@@ -1,0 +1,10 @@
+{
+  "hosting": {
+    "public": ".",
+    "ignore": ["firebase.json", "**/.*", "**/node_modules/**", "functions/**", "tests/**", "README.md", "smoke.png"],
+    "headers": [{"source":"**/*.@(js|css|html)","headers":[{"key":"Cache-Control","value":"no-cache"}]}],
+    "rewrites": [{"source":"**","destination":"/index.html"}]
+  },
+  "database": {"rules": "database.rules.json"},
+  "functions": {"source": "functions"}
+}
