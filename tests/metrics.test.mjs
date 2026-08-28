@@ -21,3 +21,20 @@ const grid=resampleOneHz(jittered,650);
 assert.equal(grid.length,8);
 assert.deepEqual(grid.map(x=>x.elapsedMs),[0,1000,2000,3000,4000,5000,6000,7000]);
 console.log('1 Hz jitter regression passed');
+
+import {computeSessionMetrics} from '../src/metrics.js';
+const skipTimeline=[
+  {phase:'BASELINE',durationSec:30,startOffsetMs:0,endOffsetMs:30000,setIndex:0,setId:'A',questionIndex:null,globalQuestionIndex:null,questionText:null},
+  {phase:'QUESTION',durationSec:20,startOffsetMs:30000,endOffsetMs:50000,setIndex:0,setId:'A',questionIndex:0,globalQuestionIndex:0,questionText:'Q1'},
+  {phase:'RESET',durationSec:10,startOffsetMs:50000,endOffsetMs:60000,setIndex:0,setId:'A',questionIndex:null,globalQuestionIndex:null,questionText:null},
+  {phase:'QUESTION',durationSec:20,startOffsetMs:60000,endOffsetMs:80000,setIndex:0,setId:'A',questionIndex:1,globalQuestionIndex:1,questionText:'Q2'},
+  {phase:'RESET',durationSec:10,startOffsetMs:80000,endOffsetMs:90000,setIndex:0,setId:'A',questionIndex:null,globalQuestionIndex:null,questionText:null},
+  {phase:'QUESTION',durationSec:20,startOffsetMs:90000,endOffsetMs:110000,setIndex:0,setId:'A',questionIndex:2,globalQuestionIndex:2,questionText:'Q3'},
+  {phase:'RECOVERY',durationSec:10,startOffsetMs:110000,endOffsetMs:120000,setIndex:0,setId:'A',questionIndex:null,globalQuestionIndex:null,questionText:null},
+];
+const fakeHr=Array.from({length:120},(_,i)=>({sessionElapsedMs:i*1000,bpm:70+(i%7),phase:'BASELINE'}));
+const skippedResult=computeSessionMetrics({aSamples:fakeHr,bSamples:fakeHr,timeline:skipTimeline,protocolId:'EVENT_V2',skippedQuestionIndexes:[1]});
+assert.equal(skippedResult.perQuestion.length,3);
+assert.equal(skippedResult.perQuestion[1].skipped,true);
+assert.equal(skippedResult.perQuestion[1].skipReason,'QUESTION_SKIPPED');
+console.log('skipped question exclusion regression passed');

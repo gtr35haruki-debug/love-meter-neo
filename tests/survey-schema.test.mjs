@@ -29,3 +29,14 @@ assert.deepEqual(CONDITION_OPTIONS.map(x=>x.label),[
   '特になし',
 ]);
 console.log('survey schema tests passed');
+
+import {EVENT_CHILD_ITEMS,EVENT_CHILD_CHOICES,EVENT_CHILD_CONDITION_OPTIONS} from '../src/survey-schema.js';
+assert.deepEqual(EVENT_CHILD_ITEMS.map(x=>x.question),[
+  'このひとと いっしょにいると、たのしい？',
+  'このひとと いっしょにいると、あんしんする？',
+  'このひととは、おはなししやすい？',
+  'また いっしょに あそんだり、おはなししたい？',
+]);
+assert.deepEqual(EVENT_CHILD_CHOICES.map(x=>[x.value,x.label]),[['0','ちがう'],['1','すこし'],['2','そう！'],['unknown','わからない']]);
+assert.deepEqual(EVENT_CHILD_CONDITION_OPTIONS.map(x=>x.value),['recent_running','temperature_discomfort','sensor_discomfort','none']);
+console.log('EVENT_CHILD_Q_V1 schema tests passed');
