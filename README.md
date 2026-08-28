@@ -1,4 +1,15 @@
-# LOVE METER NEO v0.2.2 — Pilot Review Build
+# LOVE METER NEO v0.3.0 — Event / Child Support Build
+
+## v0.3.0 のイベント向け追加（2026-08-28）
+
+- 現行イベントモードを `EVENT_V2` とし、初対面・友達・親子・兄弟姉妹・夫婦の **45問**を追加しました。
+- `CHILD_SUPPORT_V1` を追加しました。質問内容と計測時間は通常EVENT_V2と共通で、表示・読み上げ補助・操作・アンケートだけを子ども向けにします。
+- EVENT_V2ではスタッフが質問をスキップできます。スキップした質問はRAWを消さず、指標集計からだけ除外します。
+- `EVENT_CHILD_Q_V1`（4問・顔選択式）を追加しました。「わからない」は0ではなく欠測 (`null`) です。
+- イベント・子ども向けの最初の説明と結果表示を改善しました。
+- RESEARCH_V1の質問、5指標、NEO SCORE計算、EVENT計測時間は変更していません。
+
+詳細は `CHANGELOG_v0.3.0.md` を参照してください。
 
 ## v0.2.2 の追加変更（2026-08-24 パイロット反映）
 
@@ -128,7 +139,7 @@ v0.2.2 はパイロット反映版です。次段階では主に以下を詰め�
 - Production Database Rules への移行
 - Reference HR-WCC / surrogate・shuffled pair の研究解析フロー
 - ZIP一括エクスポートとより高度な Analysis
-- Pilotデータ後の DISPLAY_SCALE_RESEARCH_V1 / EVENT_V1 固定
+- Pilotデータ後の DISPLAY_SCALE_RESEARCH_V1 / EVENT_V2 固定
 
 
 ## 仕様再監査
