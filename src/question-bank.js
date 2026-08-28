@@ -41,4 +41,50 @@ export const QUESTION_BANK = {
   },
 };
 
+// EVENT_V2: 2026-08 approved event question bank.
+// The five categories below are shared by standard event display and CHILD_SUPPORT_V1.
+export const EVENT_QUESTION_BANK_V2 = {
+  '初対面': {
+    A: ['好きな食べ物は？ お互いに教えてください。','好きな遊びやスポーツは？','休みの日は何をして過ごすのが好き？'],
+    B: ['好きな季節は？ どうして？','好きな動物は？','行ってみたい場所は？'],
+    C: ['最近、楽しかったことは？','いま、好きでよくやっていることは？','二人で何かするとしたら、何をしてみたい？'],
+  },
+  '友達': {
+    A: ['一緒に何をしているときが楽しい？','この人の好きなところは？','今度、一緒に何をしたい？'],
+    B: ['二人はどうやって仲良くなった？','一緒に笑ったことを一つ教えてください。','この人が得意だと思うことは？'],
+    C: ['最近、一緒にして楽しかったことは？','「ありがとう」と言いたいことは？','一緒に行ってみたい場所は？'],
+  },
+  '親子': {
+    A: ['一緒に何をしているときが楽しい？','お互いの好きなところは？','今度、一緒に何をしたい？'],
+    B: ['最近、一緒に笑ったことは？','お互いの「すごい」と思うところは？','一緒に行ってみたい場所は？'],
+    C: ['おうちで一緒によくすることは？','「ありがとう」と伝えたいことは？','これから一緒にやってみたいことは？'],
+  },
+  '兄弟・姉妹': {
+    A: ['一緒に何をして遊ぶのが好き？','お互いの好きなところは？','今度、一緒に何をしたい？'],
+    B: ['二人でよく笑うのはどんなとき？','この人が上手だと思うことは？','一緒に行ってみたい場所は？'],
+    C: ['一緒に覚えている楽しかったことは？','「ありがとう」と言いたいことは？','これから一緒にやってみたいことは？'],
+  },
+  '夫婦': {
+    A: ['一緒にいて楽しいのはどんなとき？','相手の好きなところは？','今度、二人で何をしたい？'],
+    B: ['最近、二人で笑ったことは？','相手の「すごい」「尊敬している」ところは？','二人で行ってみたい場所は？'],
+    C: ['二人で覚えている楽しい思い出は？','相手に「ありがとう」と伝えたいことは？','これから二人で楽しみにしていることは？'],
+  },
+};
+
+export const EVENT_RELATIONSHIP_CATEGORIES = Object.freeze(['初対面','友達','親子','兄弟・姉妹','夫婦']);
+
+export function getQuestionBankForProtocol(protocolId){
+  return protocolId==='EVENT_V2' ? EVENT_QUESTION_BANK_V2 : QUESTION_BANK;
+}
+
+export function getQuestionCategoriesForProtocol(protocolId){
+  return protocolId==='EVENT_V2' ? EVENT_RELATIONSHIP_CATEGORIES : Object.keys(QUESTION_BANK);
+}
+
+export function childReadAloudPrompt(questionText=''){
+  const q=String(questionText||'').trim();
+  if(!q) return '';
+  return `二人とも、このしつもんにこたえてみてね。「${q}」`;
+}
+
 export { RELATIONSHIP_OPTIONS } from './survey-schema.js';

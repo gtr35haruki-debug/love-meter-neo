@@ -210,11 +210,16 @@ function segmentResponse(series,startMs,endMs,baseline){
   return vals.length?mean(vals.map(p=>Math.abs(p.cleanBpm-baseline))):null;
 }
 
-export function computeSessionMetrics({aSamples,bSamples,timeline,protocolId}){
+export function computeSessionMetrics({aSamples,bSamples,timeline,protocolId,skippedQuestionIndexes=[]}){
   const a=preprocess(aSamples),b=preprocess(bSamples);
   const questions=timeline.filter(x=>x.phase==='QUESTION');
+  const skipped=new Set((skippedQuestionIndexes||[]).map(Number));
   const perQuestion=[];
   for(const q of questions){
+    if(skipped.has(Number(q.globalQuestionIndex))){
+      perQuestion.push({question:q,skipped:true,skipReason:'QUESTION_SKIPPED',direction:{valid:false,directionSync:null,reason:'QUESTION_SKIPPED'},magnitudeA:{valid:false,netMagnitude:null,reason:'QUESTION_SKIPPED'},magnitudeB:{valid:false,netMagnitude:null,reason:'QUESTION_SKIPPED'},pairMagnitude:null,temporal:{valid:false,rMax:null,bestLag:null,reason:'QUESTION_SKIPPED'},balance:{valid:false,balance:null,reason:'QUESTION_SKIPPED'},qResponseA:{valid:false,netLocalQResponse:null,reason:'QUESTION_SKIPPED'},qResponseB:{valid:false,netLocalQResponse:null,reason:'QUESTION_SKIPPED'},pairQResponse:null});
+      continue;
+    }
     const setBase=timeline.find(x=>x.setIndex===q.setIndex&&x.phase==='BASELINE');
     const prev=timeline.filter(x=>x.setIndex===q.setIndex&&x.endOffsetMs<=q.startOffsetMs).at(-1) || setBase;
     const localEnd=q.startOffsetMs;

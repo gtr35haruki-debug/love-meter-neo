@@ -10,7 +10,16 @@ export const PROTOCOLS = {
   },
   EVENT_V1: {
     id: 'EVENT_V1',
-    label: 'Event',
+    label: 'Event (legacy)',
+    acclimationSec: 0,
+    setCount: 1,
+    phasesPerSet: [
+      ['BASELINE',30],['QUESTION',20],['RESET',10],['QUESTION',20],['RESET',10],['QUESTION',20],['RECOVERY',10],
+    ],
+  },
+  EVENT_V2: {
+    id: 'EVENT_V2',
+    label: 'Event V2',
     acclimationSec: 0,
     setCount: 1,
     phasesPerSet: [
@@ -58,3 +67,5 @@ export function buildTimeline(protocolId, setOrder, questionBankBySet) {
 export function getPhaseAtElapsed(timeline, elapsedMs) {
   return timeline.find(p => elapsedMs >= p.startOffsetMs && elapsedMs < p.endOffsetMs) || null;
 }
+
+export const isEventProtocol = protocolId => protocolId==='EVENT_V1' || protocolId==='EVENT_V2';

@@ -44,3 +44,26 @@ export const CONSENT_TEXT = {
   ],
   checkbox:'説明を読み、内容を理解したうえで研究参加に同意します。'
 };
+
+// EVENT_CHILD_Q_V1 — event-only, child-friendly questionnaire.
+// This is not a validated replacement for RESEARCH_V1 R1-R8 and must not be pooled as the same scale.
+export const EVENT_CHILD_ITEMS = [
+  {id:'C1', question:'このひとと いっしょにいると、たのしい？'},
+  {id:'C2', question:'このひとと いっしょにいると、あんしんする？'},
+  {id:'C3', question:'このひととは、おはなししやすい？'},
+  {id:'C4', question:'また いっしょに あそんだり、おはなししたい？'},
+];
+
+export const EVENT_CHILD_CHOICES = [
+  {value:'0', label:'ちがう', face:'☹'},
+  {value:'1', label:'すこし', face:'😐'},
+  {value:'2', label:'そう！', face:'😊'},
+  {value:'unknown', label:'わからない', face:'？'},
+];
+
+export const EVENT_CHILD_CONDITION_OPTIONS = [
+  {value:'recent_running', label:'直前まで走ったり、たくさん動いていた'},
+  {value:'temperature_discomfort', label:'暑そう・寒そうなど、環境の不快感がある'},
+  {value:'sensor_discomfort', label:'心拍計を嫌がっている／痛がっている'},
+  {value:'none', label:'特になし'},
+];

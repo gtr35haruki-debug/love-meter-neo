@@ -53,6 +53,7 @@ function publicView(s){
     timeline:s.timeline||[],displayResult:s.displayResult||null,appVersion:s.appVersion,
     pausedPhase:s.pausedPhase||null,pauseRemainingMs:s.pauseRemainingMs||null,
     introPage:Number(s.introPage||0),devicePresence:s.devicePresence||{},questionCategory:s.questionCategory||null,
+    childSupport:!!s.childSupport,childSupportVersion:s.childSupportVersion||null,skippedQuestions:s.skippedQuestions||{},eventGuideVersion:s.eventGuideVersion||null,
   };
 }
 async function loadPrivateSession(sessionId){const s=await get(ref(db,`session_meta/${sessionId}`));return s.exists()?s.val():null;}
