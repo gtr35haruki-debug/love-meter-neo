@@ -1,13 +1,13 @@
 import {
   APP_VERSION, CONFIG, ROLE, SESSION_STATUS, QUESTION_BANK_VERSION, EVENT_QUESTION_BANK_VERSION,
-  CHILD_SUPPORT_VERSION, EVENT_CHILD_QUESTIONNAIRE_VERSION, EVENT_GUIDE_VERSION, CONSENT_VERSION,
+  EVENT_GUIDE_VERSION, CONSENT_VERSION,
   PREPROCESSING_VERSION, METRICS_VERSION, DISPLAY_SCORE_VERSION, DISPLAY_SCALE_VERSION
 } from './config.js';
-import { getQuestionBankForProtocol, getQuestionCategoriesForProtocol, childReadAloudPrompt } from './question-bank.js';
+import { getQuestionBankForProtocol, getQuestionCategoriesForProtocol } from './question-bank.js';
 import { PROTOCOLS, SET_ORDERS, buildTimeline, getPhaseAtElapsed, isEventProtocol } from './protocols.js';
 import {
   RELATIONSHIP_OPTIONS, PRE_RELATIONSHIP_ITEMS, PRE_STATE_ITEMS, OPTIONAL_ITEM,
-  CONDITION_OPTIONS, POST_ITEMS, CONSENT_TEXT, EVENT_CHILD_ITEMS, EVENT_CHILD_CHOICES, EVENT_CHILD_CONDITION_OPTIONS
+  CONDITION_OPTIONS, POST_ITEMS, CONSENT_TEXT
 } from './survey-schema.js';
 import * as backend from './backend.js';
 import { HeartRateSensor, DemoHeartRateSensor } from './bluetooth-hw9.js';
@@ -54,8 +54,6 @@ const isController=()=>state.session?.controllerDevice===state.role;
 const now=()=>backend.now();
 const otherSensorRole=()=>state.role===ROLE.SENSOR_A?ROLE.SENSOR_B:ROLE.SENSOR_A;
 const canonicalPair=(a,b)=>[a,b].sort().join('|');
-const childSurveySidesOf=s=>Array.isArray(s?.childSurveySides)?s.childSurveySides:[];
-const isChildSurveyTarget=(s,side)=>!!s?.childSupport&&childSurveySidesOf(s).includes(side);
 const skippedQuestionKey=phase=>String(phase?.globalQuestionIndex??'');
 const isQuestionSkipped=(s,phase)=>!!(phase?.phase==='QUESTION'&&s?.skippedQuestions?.[skippedQuestionKey(phase)]);
 
@@ -65,12 +63,12 @@ const QUALITY_LABELS={GOOD:'良好 (GOOD)',CAUTION:'注意 (CAUTION)',INVALID:'�
 const ROLE_LABELS={DISPLAY:'表示端末 (DISPLAY)',SENSOR_A:'計測端末A (SENSOR_A)',SENSOR_B:'計測端末B (SENSOR_B)',RECORDS:'記録画面 (RECORDS)'};
 const PHASE_LABELS={BASELINE:'基準計測 (BASELINE)',QUESTION:'質問 (QUESTION)',RESET:'休憩 (RESET)',RECOVERY:'回復計測 (RECOVERY)'};
 const EVENT_LABELS={
-  QUESTION_SKIPPED:'質問スキップ (QUESTION_SKIPPED)',EVENT_CHILD_CHECK_SAVED:'こどもサポート確認保存 (EVENT_CHILD_CHECK_SAVED)',
+  QUESTION_SKIPPED:'質問スキップ (QUESTION_SKIPPED)',
   SESSION_CREATED:'セッション作成 (SESSION_CREATED)',DEVICE_JOINED:'端末参加 (DEVICE_JOINED)',HW9_CONNECTED:'心拍計接続 (HW9_CONNECTED)',DEMO_SENSOR_CONNECTED:'デモ心拍計接続 (DEMO_SENSOR_CONNECTED)',HEART_RATE_STREAM_READY:'心拍受信準備完了 (HEART_RATE_STREAM_READY)',SURVEY_SUBMITTED:'アンケート送信 (SURVEY_SUBMITTED)',ACCLIMATION_STARTED:'順応開始 (ACCLIMATION_STARTED)',MEASUREMENT_SCHEDULED:'測定開始予約 (MEASUREMENT_SCHEDULED)',PAUSED:'一時停止 (PAUSED)',RESUMED:'再開 (RESUMED)',MEASUREMENT_ENDED:'測定終了 (MEASUREMENT_ENDED)',RESULT_CALCULATED:'結果計算 (RESULT_CALCULATED)',CONTROLLER_TRANSFER:'操作端末変更 (CONTROLLER_TRANSFER)'
 };
 const REASON_LABELS={INSUFFICIENT_VALID_DATA:'有効データ不足 (INSUFFICIENT_VALID_DATA)',LOW_ACTIVITY:'反応量不足 (LOW_ACTIVITY)',CONTINUOUS_GAP:'連続欠測 (CONTINUOUS_GAP)',NO_VARIANCE:'変動不足 (NO_VARIANCE)',NO_REACTION:'反応量不足 (NO_REACTION)',MISSING_MAGNITUDE:'反応量データ不足 (MISSING_MAGNITUDE)',LOCAL_BASELINE_INVALID:'直前基準データ不足 (LOCAL_BASELINE_INVALID)',QUESTION_SKIPPED:'質問スキップ (QUESTION_SKIPPED)'};
-const CONDITION_LABELS=Object.fromEntries([...CONDITION_OPTIONS,...EVENT_CHILD_CONDITION_OPTIONS].map(x=>[x.value,`${x.label} (${x.value})`]));
-const SURVEY_ITEM_LABELS=Object.fromEntries([...PRE_RELATIONSHIP_ITEMS,...PRE_STATE_ITEMS,OPTIONAL_ITEM,...POST_ITEMS,...EVENT_CHILD_ITEMS].map(x=>[x.id,`${x.question} (${x.id})`]));
+const CONDITION_LABELS=Object.fromEntries(CONDITION_OPTIONS.map(x=>[x.value,`${x.label} (${x.value})`]));
+const SURVEY_ITEM_LABELS=Object.fromEntries([...PRE_RELATIONSHIP_ITEMS,...PRE_STATE_ITEMS,OPTIONAL_ITEM,...POST_ITEMS].map(x=>[x.id,`${x.question} (${x.id})`]));
 Object.assign(SURVEY_ITEM_LABELS,{consentAccepted:'研究参加への同意 (consentAccepted)',relationship:'現在の関係性 (relationship)',relationshipOther:'その他の関係 (relationshipOther)',condition:'測定条件 (condition)',freeText:'自由記述 (freeText)'});
 const protocolLabel=x=>PROTOCOL_LABELS[x]||x||'—';
 const statusLabel=x=>STATUS_LABELS[x]||x||'—';
@@ -172,11 +170,7 @@ function sessionLobby(){
       <div class="field"><label>モード</label><select id="protocol"><option value="RESEARCH_V1">研究モード (RESEARCH_V1)</option><option value="EVENT_V2">イベントモード (EVENT_V2)</option></select></div>
       <div class="field"><label>関係カテゴリ</label><select id="category">${initialCategories.map(x=>`<option>${esc(x)}</option>`).join('')}</select><small id="category-help">研究モードの質問カテゴリを選択します。</small></div>
       <div id="event-options" class="event-options" hidden>
-        <div class="event-options-head"><div><b>イベント設定</b><small>今回のイベント向け質問と、必要に応じて「こどもサポート」を使用します。</small></div><span class="event-chip">EVENT V2</span></div>
-        <label class="check-card child-toggle"><input type="checkbox" id="child-support"><span><b>こどもサポートを使う</b><small>質問は同じまま、大きい表示・読み上げ補助・子ども向けアンケートを有効にします。</small></span></label>
-        <div id="child-support-options" class="child-support-options" hidden>
-          <div class="field"><label>子ども向けアンケートを答える側</label><select id="child-survey-target"><option value="A">参加者A</option><option value="B">参加者B</option><option value="AB">A・Bの両方</option></select><small>親子なら子どもの側、子ども同士なら「A・Bの両方」を選びます。</small></div>
-        </div>
+        <div class="event-options-head"><div><b>イベントモード</b><small>イベント用の6カテゴリから質問を選びます。アンケートは実施せず、測定中の質問は操作端末からスキップできます。</small></div><span class="event-chip">EVENT V2</span></div>
       </div>
       <div class="grid2"><div class="field"><label>Participant A ID</label><input id="pa" placeholder="空欄で新規IDを発行"></div><div class="field"><label>Participant B ID</label><input id="pb" placeholder="空欄で新規IDを発行"></div></div>
       <button class="btn primary full" data-action="create-session">新しい計測を作成</button>
@@ -194,16 +188,11 @@ function syncSessionCreationForm(){
     category.value=cats.includes(prev)?prev:(pid==='EVENT_V2'&&cats.includes('親子')?'親子':cats[0]);
     const eventOptions=document.querySelector('#event-options'),help=document.querySelector('#category-help');
     if(eventOptions)eventOptions.hidden=pid!=='EVENT_V2';
-    if(help)help.textContent=pid==='EVENT_V2'?'今回のイベントで使う5カテゴリから選択します。':'研究モードの質問カテゴリを選択します。';
-    syncChildSupportOptions();
+    if(help)help.textContent=pid==='EVENT_V2'?'今回のイベントで使う6カテゴリから選択します。':'研究モードの質問カテゴリを選択します。';
   };
   protocol.addEventListener('change',apply);apply();
 }
-function syncChildSupportOptions(){
-  const toggle=document.querySelector('#child-support'),wrap=document.querySelector('#child-support-options');
-  if(!toggle||!wrap)return;
-  wrap.hidden=!toggle.checked;
-}
+
 
 function displayJoin(){
   return shell(`<div class="display-center join-display"><div class="display-ring"></div><div class="eyebrow">DISPLAY</div><h1>セッションへ接続</h1><p class="subtitle">SENSOR端末に表示されている6桁コードを入力してください。</p><div class="field display-code-field"><input id="join" maxlength="6" inputmode="numeric" autocomplete="one-time-code" class="code-input giant" placeholder="000000"></div><button class="btn primary" data-action="join-session">DISPLAYを接続</button></div>`);
@@ -215,9 +204,6 @@ async function createSession(){
   try{
     const protocolId=document.querySelector('#protocol')?.value||'RESEARCH_V1';
     const category=document.querySelector('#category')?.value||'友達';
-    const childSupport=protocolId==='EVENT_V2'&&!!document.querySelector('#child-support')?.checked;
-    const childSurveyTarget=childSupport?(document.querySelector('#child-survey-target')?.value||'A'):null;
-    const childSurveySides=childSurveyTarget==='AB'?['A','B']:[childSurveyTarget].filter(Boolean);
     let pa=document.querySelector('#pa')?.value.trim();let pb=document.querySelector('#pb')?.value.trim();
     if(!pa)pa=await backend.allocateParticipantId();if(!pb)pb=await backend.allocateParticipantId();
     const bank=getQuestionBankForProtocol(protocolId);
@@ -225,7 +211,7 @@ async function createSession(){
     const setOrder=await chooseLeastUsedOrder(protocolId,category,pa,pb);
     const timeline=buildTimeline(protocolId,setOrder,bank[category]);
     const displayId=await backend.allocateDisplayId();
-    const surveyStatus={preA:false,preB:false,postA:false,postB:false,childPostA:false,childPostB:false};
+    const surveyStatus={preA:false,preB:false,postA:false,postB:false};
     const s={
       sessionId:uuid(),displayId,joinCode:joinCode(),status:SESSION_STATUS.DRAFT,stage:'SETUP',protocolId,questionCategory:category,
       participantAId:pa,participantBId:pb,canonicalPairKey:canonicalPair(pa,pb),setOrder,assignmentMethod:'LEAST_USED_AVOID_PAIR_REPEAT_V1',controllerDevice:state.role,
@@ -233,14 +219,12 @@ async function createSession(){
       questionBankVersion:protocolId==='EVENT_V2'?EVENT_QUESTION_BANK_VERSION:QUESTION_BANK_VERSION,
       consentVersion:CONSENT_VERSION,preprocessingVersion:PREPROCESSING_VERSION,
       metricsVersion:METRICS_VERSION,displayScoreVersion:DISPLAY_SCORE_VERSION,displayScaleVersion:DISPLAY_SCALE_VERSION,introPage:0,
-      childSupport,childSupportVersion:childSupport?CHILD_SUPPORT_VERSION:null,
-      childQuestionnaireVersion:childSupport?EVENT_CHILD_QUESTIONNAIRE_VERSION:null,
       eventGuideVersion:protocolId==='EVENT_V2'?EVENT_GUIDE_VERSION:null,
-      childSurveySides,childConditionCheck:{values:[],savedAt:null},skippedQuestions:{},
+      skippedQuestions:{},
       sensorReady:{A:false,B:false},surveyStatus,devicePresence:{[state.role]:now()},guardianOrSchoolConsent:'externally_managed'
     };
     await backend.createSession(s);state.session=await backend.loadSession(s.sessionId);state.sessionId=s.sessionId;sessionStorage.setItem('lmneo-session',s.sessionId);
-    await backend.appendAuditLog(s.sessionId,{eventType:'SESSION_CREATED',details:{displayId,protocolId,category,setOrder,childSupport,childSurveySides}});render();
+    await backend.appendAuditLog(s.sessionId,{eventType:'SESSION_CREATED',details:{displayId,protocolId,category,setOrder}});render();
   }catch(e){alert(e?.message||'セッションを作成できませんでした。');console.error(e);}finally{state.busy=false;}
 }
 async function joinSession(){
@@ -272,37 +256,16 @@ function getStartBlockers(s){
     if(!s.surveyStatus?.preA)blockers.push('Aの事前アンケートが未完了です');
     if(!s.surveyStatus?.preB)blockers.push('Bの事前アンケートが未完了です');
   }
-  if(s.protocolId==='EVENT_V2'&&s.childSupport){
-    if(!s.childConditionCheck?.savedAt)blockers.push('こどもサポートの体調・装着確認を保存してください');
-    if((s.childConditionCheck?.values||[]).includes('sensor_discomfort'))blockers.push('心拍計の痛み・違和感を解消してから開始してください');
-  }
   return blockers;
 }
 
 function readinessRow(label,ok,detail=''){return `<div class="readiness-row"><span class="readiness-icon ${ok?'ok':''}">${ok?'✓':'·'}</span><span><b>${esc(label)}</b>${detail?`<small>${esc(detail)}</small>`:''}</span><strong>${ok?'READY':'WAIT'}</strong></div>`;}
-function childSurveysComplete(s){
-  const sides=childSurveySidesOf(s);
-  return !s?.childSupport || sides.every(side=>!!s.surveyStatus?.[`childPost${side}`]);
-}
-function childConditionCard(s){
-  if(!(s.protocolId==='EVENT_V2'&&s.childSupport))return '';
-  const selected=new Set(s.childConditionCheck?.values||[]);
-  return `<div class="control-group child-operator-card"><div class="section-title">こどもサポート確認</div><p class="mini">保護者・スタッフが確認してください。心拍計を痛がっている場合は開始できません。</p><div class="child-condition-grid">${EVENT_CHILD_CONDITION_OPTIONS.map(x=>`<label class="check-card"><input type="checkbox" name="child-condition" value="${esc(x.value)}" ${selected.has(x.value)?'checked':''}><span>${esc(x.label)}</span></label>`).join('')}</div><button class="btn btn-quiet full" data-action="save-child-condition">確認内容を保存</button>${s.childConditionCheck?.savedAt?`<div class="mini saved-note">✓ 保存済み ${new Date(s.childConditionCheck.savedAt).toLocaleTimeString('ja-JP')}</div>`:''}</div>`;
-}
-function childQuestionAssistCard(s,phase){
+function eventQuestionAssistCard(s,phase){
   if(!(s.protocolId==='EVENT_V2'&&phase?.phase==='QUESTION'))return '';
-  const skipped=isQuestionSkipped(s,phase),child=!!s.childSupport;
-  return `<div class="callout child-question-assist ${skipped?'warn':''}"><b>${skipped?'この質問はスキップ済み':child?'スタッフ読み上げ例':'イベント質問操作'}</b>${child&&!skipped?`<br>${esc(childReadAloudPrompt(phase.questionText))}`:''}${skipped?'<br>次の質問までそのままお待ちください。':''}${!skipped&&isController()?`<div class="actions child-question-actions"><button class="btn btn-quiet" data-action="skip-question">この質問をスキップ</button></div>`:''}</div>`;
+  const skipped=isQuestionSkipped(s,phase);
+  return `<div class="callout event-question-assist ${skipped?'warn':''}"><b>${skipped?'この質問はスキップ済み':'イベント質問操作'}</b>${skipped?'<br>次の質問までそのままお待ちください。':''}${!skipped&&isController()?`<div class="actions event-question-actions"><button class="btn btn-quiet" data-action="skip-question">この質問をスキップ</button></div>`:''}</div>`;
 }
 
-async function saveChildCondition(){
-  const s=state.session;if(!(s?.protocolId==='EVENT_V2'&&s.childSupport))return;
-  const values=[...document.querySelectorAll('input[name="child-condition"]:checked')].map(x=>x.value);
-  if(!values.length){alert('確認内容を1つ以上選んでください。問題がなければ「特になし」を選びます。');return;}
-  const normalized=values.includes('none')?['none']:values.filter(x=>x!=='none');
-  const check={values:normalized,savedAt:now(),savedByRole:state.role};
-  await backend.updateSession(s.sessionId,{childConditionCheck:check});await backend.appendAuditLog(s.sessionId,{eventType:'EVENT_CHILD_CHECK_SAVED',details:{values:normalized}});
-}
 async function skipCurrentQuestion(){
   const s=state.session;if(!isController()||s?.protocolId!=='EVENT_V2')return;const rt=runtimeInfo(s),phase=rt.phase;
   if(phase?.phase!=='QUESTION')return;
@@ -319,16 +282,13 @@ function operatorScreen(){
   let postButton='';
   if(s.stage==='POST_SURVEY'&&s.protocolId==='RESEARCH_V1'){
     postButton=`<button class="btn full ${s.surveyStatus?.[`post${side}`]?'good':''}" data-action="open-post-survey" ${s.surveyStatus?.[`post${side}`]?'disabled':''}>${s.surveyStatus?.[`post${side}`]?'事後アンケート 回答済み':`${side} 事後アンケート`}</button>`;
-  }else if(s.stage==='POST_SURVEY'&&s.protocolId==='EVENT_V2'&&s.childSupport){
-    if(isChildSurveyTarget(s,side)) postButton=`<button class="btn full child-survey-btn ${s.surveyStatus?.[`childPost${side}`]?'good':''}" data-action="open-child-survey" ${s.surveyStatus?.[`childPost${side}`]?'disabled':''}>${s.surveyStatus?.[`childPost${side}`]?'こどもアンケート 回答済み':`参加者${side} こどもアンケート`}</button>`;
-    else postButton='<div class="callout compact">この端末側は、こどもアンケートの対象ではありません。</div>';
   }
   const resultMetrics=s.stage==='RESULT'?operatorResultSummary(s):'';
-  const surveyReady=s.protocolId==='RESEARCH_V1'?(!!s.surveyStatus?.postA&&!!s.surveyStatus?.postB):childSurveysComplete(s);
+  const surveyReady=s.protocolId==='RESEARCH_V1'&&!!s.surveyStatus?.postA&&!!s.surveyStatus?.postB;
   const researchReadiness=s.protocolId==='RESEARCH_V1'?`${readinessRow('A 事前アンケート',!!s.surveyStatus?.preA,'個別・非公開')}${readinessRow('B 事前アンケート',!!s.surveyStatus?.preB,'個別・非公開')}`:'';
   return shell(`<div class="operator-head">
     <div><div class="section-title">${esc(state.role)} · ${controllerLabel}</div><h1 class="session-id">${esc(s.displayId)}</h1><div class="join-line">JOIN CODE <b class="join-code compact-code">${esc(s.joinCode)}</b></div></div>
-    <div class="actions">${s.childSupport?'<span class="status child-mode"><span class="dot"></span>こどもサポート</span>':''}${statusPill(connected?`${state.sensorName||'SENSOR'} CONNECTED`:state.sensorStatus,connected?'good':'bad')}${statusPill(s.stage,s.stage==='ABORTED'?'bad':s.stage==='RUNNING'?'good':'neutral')}</div>
+    <div class="actions">${statusPill(connected?`${state.sensorName||'SENSOR'} CONNECTED`:state.sensorStatus,connected?'good':'bad')}${statusPill(s.stage,s.stage==='ABORTED'?'bad':s.stage==='RUNNING'?'good':'neutral')}</div>
   </div>
   <div class="layout operator-layout">
     <main>
@@ -337,7 +297,7 @@ function operatorScreen(){
         <div id="live-hr-chart" class="hr-chart">${hrSvg(state.lastSamples)}</div>
         <div class="instrument-grid"><div><small>Protocol</small><b>${esc(s.protocolId)}</b></div><div><small>Question Category</small><b>${esc(s.questionCategory)}</b></div><div><small>Set order</small><b>${esc(String(s.setOrder))}</b></div><div><small>Controller</small><b>${esc(s.controllerDevice||'—')}</b></div></div>
         ${currentQuestion?`<div class="current-question"><span>現在の質問</span><strong>${esc(currentQuestion)}</strong></div>`:''}
-        ${childQuestionAssistCard(s,rt.phase)}
+        ${eventQuestionAssistCard(s,rt.phase)}
       </section>
       ${resultMetrics}
     </main>
@@ -347,16 +307,15 @@ function operatorScreen(){
       ${readinessRow('Sensor A',!!s.sensorReady?.A,'実心拍を数秒受信してREADY')}
       ${readinessRow('Sensor B',!!s.sensorReady?.B,'実心拍を数秒受信してREADY')}
       <div class="control-group"><div class="section-title">SENSOR ${side}</div><div class="grid2"><button class="btn" data-action="connect-hw9">HW9接続</button><button class="btn btn-quiet" data-action="connect-demo">DEMO HR</button></div>${preButton}</div>
-      ${(s.stage==='SETUP'||s.stage==='READY')?childConditionCard(s):''}
       ${s.stage==='SETUP'&&isController()?`<div class="control-group"><div class="section-title">PC1 参加説明</div><div class="intro-control"><button class="btn btn-quiet" data-action="intro-prev" ${Number(s.introPage||0)===0?'disabled':''}>←</button><span>${Number(s.introPage||0)+1} / 3</span><button class="btn btn-quiet" data-action="intro-next" ${Number(s.introPage||0)>=2?'disabled':''}>→</button></div></div>`:''}
       ${s.stage==='SETUP'?`<div class="control-group"><button class="btn primary full" data-action="start-acclim" ${canProceed?'':'disabled'}>${s.protocolId==='RESEARCH_V1'?'5分の順応を開始':'計測準備完了'}</button>${!canProceed?`<div class="blocker"><b>開始できない理由</b>${blockers.map(x=>`<span>• ${esc(x)}</span>`).join('')}</div>`:''}</div>`:''}
       ${s.stage==='ACCLIMATION'?`<div class="control-group"><div class="callout info">順応中 <b id="live-acclim">${fmt((s.readyAtMs||0)-now())}</b><br><small>装着直後・初期緊張の影響を減らすための時間です。</small></div></div>`:''}
       ${s.stage==='READY'?`<div class="control-group"><button class="btn primary full" data-action="start-measure" ${canProceed?'':'disabled'}>3秒後に計測開始</button>${!canProceed?`<div class="blocker">${blockers.map(x=>`<span>• ${esc(x)}</span>`).join('')}</div>`:''}</div>`:''}
       ${s.stage==='RUNNING'||s.stage==='PAUSED'?`<div class="control-group">${isController()?`<div class="grid2"><button class="btn" data-action="${s.stage==='PAUSED'?'resume':'pause'}">${s.stage==='PAUSED'?'再開':'一時停止'}</button><button class="btn danger" data-action="abort">中断</button></div>`:`<div class="callout">操作は ${esc(s.controllerDevice)} から行います。</div>`}</div>`:''}
       ${postButton}
-      ${s.stage==='POST_SURVEY'&&isController()&&surveyReady?'<button class="btn primary full" data-action="calculate">結果を計算</button>':''}
+      ${s.stage==='POST_SURVEY'&&s.protocolId==='RESEARCH_V1'&&isController()&&surveyReady?'<button class="btn primary full" data-action="calculate">結果を計算</button>':''}
       ${(s.stage==='SETUP'||s.stage==='READY'||s.stage==='PAUSED')&&isController()?`<button class="btn btn-quiet full" data-action="transfer-controller">操作権を ${esc(otherSensorRole())} へ移す</button>`:''}
-      <div class="footer-note">PC2 / PC3はアンケート時以外、参加者には見せません。</div>
+      <div class="footer-note">イベントモードではアンケートを行いません。研究モードのアンケート時以外、PC2 / PC3は参加者には見せません。</div>
     </aside>
   </div>`);
 }
@@ -379,7 +338,7 @@ async function finishMeasurement(){
   if(state.finishing||state.session?.stage!=='RUNNING'||!isController())return;state.finishing=true;
   try{
     const s=state.session;
-    const needsSurvey=s.protocolId==='RESEARCH_V1'||(s.protocolId==='EVENT_V2'&&s.childSupport);
+    const needsSurvey=s.protocolId==='RESEARCH_V1';
     const next=needsSurvey?'POST_SURVEY':'CALCULATING';
     await backend.updateSession(state.sessionId,{stage:next,status:SESSION_STATUS.SYNC_PENDING,measurementEndedAt:now()});
     await backend.appendAuditLog(state.sessionId,{eventType:'MEASUREMENT_ENDED',details:{nextStage:next}});
@@ -448,20 +407,15 @@ function hrSvg(samples){
 
 function surveyScreen(){
   const stage=state.surveyStage,side=state.surveySide;
-  const child=stage==='child-post';
-  return shell(`<main class="privacy ${child?'child-survey-page':''}">
-    <div class="privacy-title"><div><div class="section-title">PARTICIPANT ${side}</div><h1>${child?'かんたんアンケート':stage==='pre'?'測定前アンケート':'測定後アンケート'}</h1></div><div class="privacy-lock">PRIVATE RESPONSE</div></div>
-    <div class="callout privacy-note">${child?'いちばん近いものをえらんでね。わからないときは「わからない」で大丈夫です。':'この回答は相手には表示されません。回答中は心拍・相手のID・研究者用情報を表示しません。正解や不正解はありません。'}</div>
-    <form id="survey-form" class="survey-form ${child?'child-survey-form':''}">
-      ${child?childSurveyHtml():stage==='pre'?preSurveyHtml():postSurveyHtml()}
-      <div class="survey-actions"><button class="btn btn-quiet" type="button" data-action="cancel-survey">スタッフ用：アンケートを閉じる</button><button class="btn primary" type="submit">${child?'こたえを保存':'回答を確認して保存'}</button></div>
+  return shell(`<main class="privacy">
+    <div class="privacy-title"><div><div class="section-title">PARTICIPANT ${side}</div><h1>${stage==='pre'?'測定前アンケート':'測定後アンケート'}</h1></div><div class="privacy-lock">PRIVATE RESPONSE</div></div>
+    <div class="callout privacy-note">この回答は相手には表示されません。回答中は心拍・相手のID・研究者用情報を表示しません。正解や不正解はありません。</div>
+    <form id="survey-form" class="survey-form">
+      ${stage==='pre'?preSurveyHtml():postSurveyHtml()}
+      <div class="survey-actions"><button class="btn btn-quiet" type="button" data-action="cancel-survey">スタッフ用：アンケートを閉じる</button><button class="btn primary" type="submit">回答を確認して保存</button></div>
     </form>
   </main>`,{participant:true});
 }
-function childSurveyHtml(){return `
-  <section class="survey-section child-survey-section"><div class="survey-section-head"><span>♡</span><div><h2>いまのきもちに近いものをえらんでね</h2><p>スタッフがよみあげても大丈夫です。</p></div></div>
-  ${EVENT_CHILD_ITEMS.map(item=>`<div class="child-survey-question"><div class="child-question-title"><span>${esc(item.id)}</span><strong>${esc(item.question)}</strong></div><div class="face-choice-grid">${EVENT_CHILD_CHOICES.map(c=>`<label class="face-choice"><input type="radio" name="${esc(item.id)}" value="${esc(c.value)}" required><span class="face">${esc(c.face)}</span><b>${esc(c.label)}</b></label>`).join('')}</div></div>`).join('')}</section>`;}
-
 function preSurveyHtml(){return `
   <section class="survey-section consent-section"><div class="survey-section-head"><span>01</span><div><h2>${esc(CONSENT_TEXT.title)}</h2><p>心拍測定を始める前に確認してください。</p></div></div>${CONSENT_TEXT.body.map(x=>`<p class="consent-line">${esc(x)}</p>`).join('')}<label class="check-card important"><input type="checkbox" name="consentAccepted" value="yes" required><span>${esc(CONSENT_TEXT.checkbox)}</span></label></section>
   <section class="survey-section"><div class="survey-section-head"><span>02</span><div><h2>あなたが考える現在の関係性</h2><p>この相手との現在の関係として、最も近いものを1つ選んでください。</p></div></div><div class="relationship-grid">${RELATIONSHIP_OPTIONS.map((x,i)=>`<label class="choice-card"><input type="radio" name="relationship" value="${esc(x)}" ${i===0?'required':''}><span>${esc(x)}</span></label>`).join('')}</div><div id="relationship-other-wrap" class="field relationship-other" hidden><label>その他の場合</label><input name="relationshipOther" id="relationship-other" placeholder="現在の関係を入力してください" disabled></div></section>
@@ -477,58 +431,49 @@ function rangeField(item,{optional=false}={}){
   return `<div class="survey-question" data-question="${item.id}"><div class="survey-question-title"><span>${esc(item.id)}</span><strong>${esc(item.question)}</strong></div><div class="scale-anchors"><span><b>0</b>${esc(item.low)}</span><span><b>100</b>${esc(item.high)}</span></div><div class="range-row"><span>0</span><input type="range" min="0" max="100" step="1" value="50" name="${item.id}" data-range="${item.id}" ${optional?'data-optional="true"':''}><output id="out-${item.id}" class="range-value">50</output></div><div class="range-ticks"><span>0</span><span>25</span><span>50</span><span>75</span><span>100</span></div></div>`;
 }
 function surveyCompleteScreen(){
-  const x=state.surveyLocked;const child=x?.stage==='child-post';
-  return shell(`<div class="display-center survey-complete ${child?'child-survey-complete':''}"><div class="complete-mark">✓</div><div class="eyebrow">RESPONSE SAVED</div><h1>${child?'こたえを保存したよ！':'回答を保存しました'}</h1><p class="subtitle">${child?'ありがとう。スタッフにPCを返してね。':'個別の回答内容は相手には表示されません。<br><b>PCを実験担当者へ返してください。</b>'}</p><button class="btn btn-quiet staff-return" data-action="staff-return">スタッフ用：運用画面に戻る</button><p class="mini">${child?'こどもアンケート':esc(x?.stage==='pre'?'測定前':'測定後')} · Participant ${esc(x?.side||'')}</p></div>`,{participant:true});
+  const x=state.surveyLocked;
+  return shell(`<div class="display-center survey-complete"><div class="complete-mark">✓</div><div class="eyebrow">RESPONSE SAVED</div><h1>回答を保存しました</h1><p class="subtitle">個別の回答内容は相手には表示されません。<br><b>PCを実験担当者へ返してください。</b></p><button class="btn btn-quiet staff-return" data-action="staff-return">スタッフ用：運用画面に戻る</button><p class="mini">${esc(x?.stage==='pre'?'測定前':'測定後')} · Participant ${esc(x?.side||'')}</p></div>`,{participant:true});
 }
 async function submitSurvey(form){
   const button=form.querySelector('button[type="submit"]');if(button){button.disabled=true;button.textContent='保存中…';}
   try{
     const fd=new FormData(form),data={};for(const [k,v] of fd.entries()){if(k==='condition'){data.condition??=[];data.condition.push(v);}else data[k]=v;}
     for(const [k,v] of Object.entries(data))if(/^(R\d|S\d|P\d|O1)$/.test(k))data[k]=Number(v);
-    if(state.surveyStage==='child-post'){
-      for(const item of EVENT_CHILD_ITEMS){const v=data[item.id];data[item.id]=v==='unknown'?null:Number(v);}
-      data.questionnaireVersion=EVENT_CHILD_QUESTIONNAIRE_VERSION;
-    }
     if(data.O1_skip){data.O1=null;delete data.O1_skip;}
     if(data.condition?.includes('none'))data.condition=['none'];
     data.consentVersion=CONSENT_VERSION;if(state.surveyStage==='pre')data.consentAccepted=data.consentAccepted==='yes';data.submittedFromRole=state.role;
     const side=state.surveySide,stage=state.surveyStage;
-    const storageStage=stage==='child-post'?'childPost':stage;
-    const statusKey=stage==='child-post'?`childPost${side}`:`${stage}${side}`;
+    const storageStage=stage;
+    const statusKey=`${stage}${side}`;
     await backend.saveSurvey(state.sessionId,side,storageStage,data);await backend.setSurveyStatus(state.sessionId,statusKey,true);await backend.appendAuditLog(state.sessionId,{eventType:'SURVEY_SUBMITTED',details:{side,stage:storageStage,questionnaireVersion:data.questionnaireVersion||null}});
     state.surveyLocked={side,stage};state.surveyStage=null;state.surveySide=null;render();
   }catch(e){alert(`回答を保存できませんでした。\n${e?.message||e}`);if(button){button.disabled=false;button.textContent='回答を確認して保存';}}
 }
 function displayScreen(){
-  const s=state.session;const child=!!(s.protocolId==='EVENT_V2'&&s.childSupport);
+  const s=state.session;
   if(s.stage==='RESULT')return resultDisplay(s);if(s.stage==='ABORTED')return phaseDisplay('MEASUREMENT ENDED','計測を終了しました。スタッフの案内をお待ちください。');
   if(s.stage==='SETUP')return explainDisplay(s);
   if(s.stage==='ACCLIMATION')return phaseDisplay('CALIBRATING','心拍センサーをつけたまま、楽な姿勢でお待ちください。',(s.readyAtMs||now())-now());
-  if(s.stage==='READY')return phaseDisplay(child?'じゅんび OK！':'SYSTEM READY',child?'スタッフがスタートするまで まっていてね。':'準備ができました。スタッフの案内をお待ちください。');
-  if(s.stage==='POST_SURVEY')return phaseDisplay(child?'けいそく おわり！':'MEASUREMENT COMPLETE',child?'かんたんなアンケートに こたえてね。':'最後のアンケートに回答してください。');
-  if(s.stage==='CALCULATING')return phaseDisplay(child?'けっかを つくっているよ':'ANALYZING HEART REACTIONS',child?'二人のドキドキを しらべています。':'二人の心拍リアクションを解析しています。');
-  if(s.stage==='PAUSED')return phaseDisplay(child?'ちょっと まってね':'MEASUREMENT PAUSED',child?'スタッフが かくにんしています。':'しばらくお待ちください。');
+  if(s.stage==='READY')return phaseDisplay('SYSTEM READY','準備ができました。スタッフの案内をお待ちください。');
+  if(s.stage==='POST_SURVEY')return phaseDisplay('MEASUREMENT COMPLETE','最後のアンケートに回答してください。');
+  if(s.stage==='CALCULATING')return phaseDisplay('ANALYZING HEART REACTIONS','二人の心拍リアクションを解析しています。');
+  if(s.stage==='PAUSED')return phaseDisplay('MEASUREMENT PAUSED','しばらくお待ちください。');
   if(s.stage==='RUNNING'){
-    const rt=runtimeInfo(s);if(!rt.phase)return phaseDisplay(child?'もうすぐ はじまるよ':'PREPARING',child?'そのまま まっていてね。':'まもなく始まります。',Math.max(0,(s.t0||now())-now()));
+    const rt=runtimeInfo(s);if(!rt.phase)return phaseDisplay('PREPARING','まもなく始まります。',Math.max(0,(s.t0||now())-now()));
     if(rt.phase.phase==='QUESTION'){
       const skipped=isQuestionSkipped(s,rt.phase);
-      if(child&&skipped)return shell(`<div class="display-center question-display child-display skipped-display"><div class="eyebrow">しつもん ${(rt.phase.globalQuestionIndex??0)+1}</div><div class="question-large child-question-large">このしつもんは<br>スキップしました</div><p class="display-hint child-hint">つぎのしつもんまで まっていてね。</p><div id="live-countdown" class="countdown display-countdown">${fmt(rt.remaining)}</div><div class="progress"><span id="live-progress" style="width:${100*(1-rt.remaining/(rt.phase.durationSec*1000))}%"></span></div></div>`,{display:true});
-      if(!child&&skipped)return shell(`<div class="display-center question-display skipped-display"><div class="eyebrow">QUESTION ${String((rt.phase.globalQuestionIndex??0)+1).padStart(2,'0')}</div><div class="question-large">この質問はスキップしました</div><p class="display-hint">次の質問までお待ちください。</p><div id="live-countdown" class="countdown display-countdown">${fmt(rt.remaining)}</div><div class="progress"><span id="live-progress" style="width:${100*(1-rt.remaining/(rt.phase.durationSec*1000))}%"></span></div></div>`,{display:true});
-      return shell(`<div class="display-center question-display ${child?'child-display':''}"><div class="eyebrow">${child?'しつもん':'QUESTION'} ${String((rt.phase.globalQuestionIndex??0)+1).padStart(2,'0')}</div><div class="question-large ${child?'child-question-large':''}">${esc(rt.phase.questionText)}</div><p class="display-hint ${child?'child-hint':''}">${child?'二人とも こたえてみてね！':'二人で自由に話してください。正解・不正解はありません。'}</p><div id="live-countdown" class="countdown display-countdown">${fmt(rt.remaining)}</div><div class="progress"><span id="live-progress" style="width:${100*(1-rt.remaining/(rt.phase.durationSec*1000))}%"></span></div>${child?'':'<div class="twin-wave" aria-hidden="true"><i></i><i></i></div>'}</div>`,{display:true});
+      if(skipped)return shell(`<div class="display-center question-display skipped-display"><div class="eyebrow">QUESTION ${String((rt.phase.globalQuestionIndex??0)+1).padStart(2,'0')}</div><div class="question-large">この質問はスキップしました</div><p class="display-hint">次の質問までお待ちください。</p><div id="live-countdown" class="countdown display-countdown">${fmt(rt.remaining)}</div><div class="progress"><span id="live-progress" style="width:${100*(1-rt.remaining/(rt.phase.durationSec*1000))}%"></span></div></div>`,{display:true});
+      return shell(`<div class="display-center question-display"><div class="eyebrow">QUESTION ${String((rt.phase.globalQuestionIndex??0)+1).padStart(2,'0')}</div><div class="question-large">${esc(rt.phase.questionText)}</div><p class="display-hint">二人で自由に話してください。正解・不正解はありません。</p><div id="live-countdown" class="countdown display-countdown">${fmt(rt.remaining)}</div><div class="progress"><span id="live-progress" style="width:${100*(1-rt.remaining/(rt.phase.durationSec*1000))}%"></span></div><div class="twin-wave" aria-hidden="true"><i></i><i></i></div></div>`,{display:true});
     }
-    if(rt.phase.phase==='BASELINE')return phaseDisplay(child?'まずは そのまま':'CALIBRATING',child?'そのまま まっていてね。':'そのままお待ちください。',rt.remaining);
-    if(rt.phase.phase==='RESET')return phaseDisplay(child?'つぎの しつもんへ':'NEXT QUESTION',child?'すこし まっていてね。':'次の質問まで少しお待ちください。',rt.remaining);
-    if(rt.phase.phase==='RECOVERY')return phaseDisplay(child?'さいごに そのまま':'RECOVERY',child?'もうすこしだけ まっていてね。':'そのままお待ちください。',rt.remaining);
+    if(rt.phase.phase==='BASELINE')return phaseDisplay('CALIBRATING','そのままお待ちください。',rt.remaining);
+    if(rt.phase.phase==='RESET')return phaseDisplay('NEXT QUESTION','次の質問まで少しお待ちください。',rt.remaining);
+    if(rt.phase.phase==='RECOVERY')return phaseDisplay('RECOVERY','そのままお待ちください。',rt.remaining);
   }
   return explainDisplay(s);
 }
 function explainDisplay(s){
-  const child=!!(s.protocolId==='EVENT_V2'&&s.childSupport),event=s.protocolId==='EVENT_V2';
-  const pages=child?[
-    {n:'01',title:'LOVE METER NEOって なに？',body:'二人で しつもんに こたえながら、うでのきかいで「ドキドキ」を はかるよ。',sub:'二人のドキドキが どんなふうに うごくかを見ながら、ドキドキと二人のつながりに どんなかんけいがあるかを けんきゅうしています。'},
-    {n:'02',title:'どうするの？',body:'しつもんが でたら、二人とも こたえてみてね。',sub:'わからない・こたえたくない しつもんは、スタッフに言えばスキップできるよ。'},
-    {n:'03',title:'だいじょうぶだよ',body:'せいかいや まちがいは ありません。',sub:'うでのきかいが いたい・いやだと おもったら、すぐスタッフに おしえてね。'}
-  ]:event?[
+  const event=s.protocolId==='EVENT_V2';
+  const pages=event?[
     {n:'01',title:'LOVE METER NEOとは？',body:'二人で同じ質問に答えながら心拍を測り、二人の「心拍リアクション」を見える化する体験です。',sub:'心拍が同じ方向に動いたか、近いタイミングで反応したかなどを分析し、心拍反応と二人の関係とのつながりを調べています。'},
     {n:'02',title:'おねがい',body:'質問が表示されたら、二人とも自由に答えてください。',sub:'正解や不正解はありません。答えにくい質問は、スタッフに伝えればスキップできます。'},
     {n:'03',title:'結果について',body:'NEO SCOREは、今回の心拍リアクションを分かりやすく表示する体験用スコアです。',sub:'「なかよし度」や「相性」を断定する点数ではありません。途中でやめたい場合は、いつでもスタッフに伝えてください。'}
@@ -538,7 +483,7 @@ function explainDisplay(s){
     {n:'03',title:'大切なこと',body:'心拍は緊張・運動・暑さ・体調などでも変化します。',sub:'LOVE METER NEOは心拍だけで「好き」「相性が良い」などを断定するものではありません。アンケートの回答は相手には表示されません。'}
   ];
   const idx=clamp(Number(s.introPage||0),0,2),p=pages[idx];
-  return shell(`<div class="display-center intro-display ${child?'child-intro-display':''}"><div class="intro-index">${p.n}</div><div class="eyebrow">${child?'こどもサポート':'PARTICIPANT GUIDE'}</div><h1>${esc(p.title)}</h1><p class="intro-main">${esc(p.body)}</p><p class="intro-sub">${esc(p.sub)}</p><div class="intro-dots">${pages.map((_,i)=>`<span class="${i===idx?'active':''}"></span>`).join('')}</div>${idx===2?`<p class="standby">${child?'スタッフが はじめるまで まっていてね。':'準備ができたら、スタッフの案内をお待ちください。'}</p>`:''}</div>`,{display:true});
+  return shell(`<div class="display-center intro-display"><div class="intro-index">${p.n}</div><div class="eyebrow">PARTICIPANT GUIDE</div><h1>${esc(p.title)}</h1><p class="intro-main">${esc(p.body)}</p><p class="intro-sub">${esc(p.sub)}</p><div class="intro-dots">${pages.map((_,i)=>`<span class="${i===idx?'active':''}"></span>`).join('')}</div>${idx===2?`<p class="standby">準備ができたら、スタッフの案内をお待ちください。</p>`:''}</div>`,{display:true});
 }
 function phaseDisplay(title,msg,remaining=null){return shell(`<div class="display-center phase-display"><div class="phase-visual"><span></span><span></span><span></span></div><div class="eyebrow">LOVE METER NEO</div><h1>${esc(title)}</h1><p class="subtitle">${esc(msg)}</p>${remaining!=null?`<div id="live-countdown" class="countdown display-countdown">${fmt(remaining)}</div>`:''}</div>`,{display:true});}
 
@@ -553,11 +498,10 @@ function miniTimelineSvg(tl){
   return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="A/B heart reaction timeline"><polyline class="lineA" points="${path(A)}"/><polyline class="lineB" points="${path(B)}"/></svg>`;
 }
 function resultDisplay(s){
-  const d=s.displayResult||{},score=Number.isFinite(d.neoScore)?Math.round(d.neoScore):null,b=d.scoreBreakdown||s.metrics?.displayBreakdown||{},child=!!(s.protocolId==='EVENT_V2'&&s.childSupport);
-  if(score==null)return shell(`<div class="display-center ${child?'child-display':''}"><div class="eyebrow">${child?'けいそくが うまくできませんでした':'測定不成立 (MEASUREMENT INCOMPLETE)'}</div><h1>${child?'スタッフと もういちど かくにんしよう':'十分なデータを取得できませんでした'}</h1><p class="subtitle">${child?'だいじょうぶ。スタッフのあんないを まってね。':'スタッフの案内に従って、必要に応じて再計測してください。'}</p><button class="btn btn-quiet" data-action="display-home">ホームへ戻る</button></div>`,{display:true});
-  const syncLabel=child?'いっしょに うごいた':'心拍シンクロ (SYNC)',reactionLabel=child?'ドキドキの おおきさ':'心拍リアクション (REACTION)';
-  const caption=child?'今回の二人のドキドキの動きを、わかりやすくした体験用スコアだよ。なかよし度を決める点数ではありません。':'二人の「反応の似かた」と「心拍に現れた反応の強さ」を合わせた体験用スコアです。<br>感情そのものや相性を断定する値ではありません。';
-  return shell(`<div class="result-page ${child?'child-result-page':''}"><div class="result-grid"><section class="score-block"><div class="eyebrow">NEO SCORE</div><div class="big-number">${score}</div><div class="score-components"><div><small>${syncLabel}</small><strong>${Number.isFinite(b.syncScore)?Math.round(b.syncScore):'—'}</strong></div><div><small>${reactionLabel}</small><strong>${Number.isFinite(b.reactionScore)?Math.round(b.reactionScore):'—'}</strong></div></div><div class="score-caption">${caption}</div></section><section class="radar-block">${radarSvg(d.radar||{},500,child)}</section><section class="reaction-block"><div class="section-title">${child?'こんかいの ドキドキ':'今回の反応パターン (REACTION STYLE)'}</div><h2>${esc(child?'二人のドキドキを5つの見方で見てみよう！':d.comment||'')}</h2><div class="section-title spaced">${child?'いちばん ドキドキした しつもん':'最も反応が大きかった質問 (MOST REACTIVE QUESTION)'}</div><div class="callout result-question">${esc(d.mostReactiveQuestion||'—')}</div><button class="btn btn-quiet result-home" data-action="display-home">ホームへ戻る</button></section></div><section class="timeline-block"><div class="timeline-head"><span>${child?'Aのドキドキ':'A 心拍リアクション (A HEART REACTION)'}</span><span>${child?'Bのドキドキ':'B 心拍リアクション (B HEART REACTION)'}</span></div>${miniTimelineSvg(d.miniTimeline)}</section></div>`,{display:true});
+  const d=s.displayResult||{},score=Number.isFinite(d.neoScore)?Math.round(d.neoScore):null,b=d.scoreBreakdown||s.metrics?.displayBreakdown||{};
+  if(score==null)return shell(`<div class="display-center"><div class="eyebrow">測定不成立 (MEASUREMENT INCOMPLETE)</div><h1>十分なデータを取得できませんでした</h1><p class="subtitle">スタッフの案内に従って、必要に応じて再計測してください。</p><button class="btn btn-quiet" data-action="display-home">ホームへ戻る</button></div>`,{display:true});
+  const caption='二人の「反応の似かた」と「心拍に現れた反応の強さ」を合わせた体験用スコアです。<br>感情そのものや相性を断定する値ではありません。';
+  return shell(`<div class="result-page"><div class="result-grid"><section class="score-block"><div class="eyebrow">NEO SCORE</div><div class="big-number">${score}</div><div class="score-components"><div><small>心拍シンクロ (SYNC)</small><strong>${Number.isFinite(b.syncScore)?Math.round(b.syncScore):'—'}</strong></div><div><small>心拍リアクション (REACTION)</small><strong>${Number.isFinite(b.reactionScore)?Math.round(b.reactionScore):'—'}</strong></div></div><div class="score-caption">${caption}</div></section><section class="radar-block">${radarSvg(d.radar||{},500)}</section><section class="reaction-block"><div class="section-title">今回の反応パターン (REACTION STYLE)</div><h2>${esc(d.comment||'')}</h2><div class="section-title spaced">最も反応が大きかった質問 (MOST REACTIVE QUESTION)</div><div class="callout result-question">${esc(d.mostReactiveQuestion||'—')}</div><button class="btn btn-quiet result-home" data-action="display-home">ホームへ戻る</button></section></div><section class="timeline-block"><div class="timeline-head"><span>A 心拍リアクション (A HEART REACTION)</span><span>B 心拍リアクション (B HEART REACTION)</span></div>${miniTimelineSvg(d.miniTimeline)}</section></div>`,{display:true});
 }
 async function calculateResults(){
   const s=await backend.loadSession(state.sessionId);await backend.flushOutbox();const a=await backend.loadHr(s.sessionId,'A'),b=await backend.loadHr(s.sessionId,'B');
@@ -628,7 +572,7 @@ async function renderSessionDetail(el){
   else content=recordsOverviewTab(s);
   el.innerHTML=`<div class="records-detail-head"><button class="btn btn-quiet" data-action="records-back">← 記録一覧 (Records)</button><div><div class="section-title">測定詳細 (SESSION DETAIL)</div><h2>${esc(s.displayId)}</h2></div><div class="actions"><button class="btn" data-action="export-current-json">JSON</button><button class="btn" data-action="export-current-raw">生データCSV (RAW CSV)</button></div></div><div class="detail-tabs">${tabs.map(([id,label])=>`<button data-action="record-tab" data-tab="${id}" class="${state.recordsTab===id?'active':''}">${label}</button>`).join('')}</div><div class="panel detail-panel">${content}</div>`;
 }
-function recordsOverviewTab(s){return `<div class="overview-grid">${kv('測定ID (Measurement ID)',s.displayId)}${kv('内部ID (Internal UUID)',s.sessionId)}${kv('実験方式 (Protocol)',protocolLabel(s.protocolId))}${kv('状態 (Status)',statusLabel(s.status))}${kv('参加者A (Participant A)',s.participantAId)}${kv('参加者B (Participant B)',s.participantBId)}${kv('ペアID (Canonical Pair)',s.canonicalPairKey||canonicalPair(s.participantAId,s.participantBId))}${kv('関係カテゴリ (Question Category)',s.questionCategory)}${kv('質問セット順 (Set order)',s.setOrder)}${kv('こどもサポート (Child Support)',s.childSupport?'ON':'OFF')}${s.childSupport?kv('こどもサポート版 (Child Support Version)',s.childSupportVersion):''}${s.childSupport?kv('こどもアンケート版 (Child Questionnaire)',s.childQuestionnaireVersion):''}${isEventProtocol(s.protocolId)?kv('イベント説明版 (Event Guide)',s.eventGuideVersion||'legacy'):''}${kv('質問スキップ数 (Skipped Questions)',Object.keys(s.skippedQuestions||{}).length)}${kv('操作端末 (Controller)',roleLabel(s.controllerDevice))}${kv('作成日時 (Created)',new Date(s.createdAt||0).toLocaleString('ja-JP'))}${kv('アプリ版 (APP)',s.appVersion)}${kv('質問バンク (Question Bank)',s.questionBankVersion)}${kv('前処理 (Preprocessing)',s.preprocessingVersion)}${kv('指標計算 (Metrics)',s.metricsVersion)}${kv('表示スコア方式 (Display Score)',s.displayScoreVersion)}${kv('表示尺度 (Display Scale)',s.displayScaleVersion)}</div><div class="callout" style="margin-top:18px">NEO SCOREは体験表示値です。質問をスキップした場合、その質問はセッション指標の集計から除外します。</div>`;}
+function recordsOverviewTab(s){return `<div class="overview-grid">${kv('測定ID (Measurement ID)',s.displayId)}${kv('内部ID (Internal UUID)',s.sessionId)}${kv('実験方式 (Protocol)',protocolLabel(s.protocolId))}${kv('状態 (Status)',statusLabel(s.status))}${kv('参加者A (Participant A)',s.participantAId)}${kv('参加者B (Participant B)',s.participantBId)}${kv('ペアID (Canonical Pair)',s.canonicalPairKey||canonicalPair(s.participantAId,s.participantBId))}${kv('関係カテゴリ (Question Category)',s.questionCategory)}${kv('質問セット順 (Set order)',s.setOrder)}${isEventProtocol(s.protocolId)?kv('イベント説明版 (Event Guide)',s.eventGuideVersion||'legacy'):''}${kv('質問スキップ数 (Skipped Questions)',Object.keys(s.skippedQuestions||{}).length)}${kv('操作端末 (Controller)',roleLabel(s.controllerDevice))}${kv('作成日時 (Created)',new Date(s.createdAt||0).toLocaleString('ja-JP'))}${kv('アプリ版 (APP)',s.appVersion)}${kv('質問バンク (Question Bank)',s.questionBankVersion)}${kv('前処理 (Preprocessing)',s.preprocessingVersion)}${kv('指標計算 (Metrics)',s.metricsVersion)}${kv('表示スコア方式 (Display Score)',s.displayScoreVersion)}${kv('表示尺度 (Display Scale)',s.displayScaleVersion)}</div><div class="callout" style="margin-top:18px">NEO SCOREは体験表示値です。質問をスキップした場合、その質問はセッション指標の集計から除外します。</div>`;}
 const kv=(k,v)=>`<div class="kv"><span>${esc(k)}</span><b>${esc(v??'—')}</b></div>`;
 async function recordsHeartTab(s){const [a,b]=await Promise.all([backend.loadHr(s.sessionId,'A'),backend.loadHr(s.sessionId,'B')]);return `<div class="section-title">実セッション経過時間 (TRUE SESSION ELAPSED TIME)</div><div class="dual-chart">${dualHrSvg(a,b)}</div><div class="legend"><span class="legend-a">参加者A (A)</span><span class="legend-b">参加者B (B)</span><span>欠測は線をつながず、空白 (gap) として表示</span></div><div class="grid3" style="margin-top:18px"><div class="kpi"><small>A 取得件数 (A samples)</small><strong>${a.length}</strong></div><div class="kpi"><small>B 取得件数 (B samples)</small><strong>${b.length}</strong></div><div class="kpi"><small>計測時間 (Duration)</small><strong>${fmt(Math.max(a.at(-1)?.sessionElapsedMs||0,b.at(-1)?.sessionElapsedMs||0))}</strong></div></div>`;}
 function splitByGap(arr,gap=CONFIG.graphGapMs){const chunks=[];let cur=[];for(const p of arr){if(cur.length&&p.sessionElapsedMs-cur.at(-1).sessionElapsedMs>gap){chunks.push(cur);cur=[];}cur.push(p);}if(cur.length)chunks.push(cur);return chunks;}
@@ -636,13 +580,12 @@ function dualHrSvg(a,b){const all=[...a,...b].filter(x=>Number.isFinite(x.bpm)&&
 const metricCell=(value,reason=null,digits=1)=>Number.isFinite(value)?num(value,digits):`<span class="na-value" title="${esc(reasonLabel(reason)||'算出条件を満たしませんでした')}">算出不可 (NA)</span>`;
 function recordsMetricsTab(s){const m=s.metrics||{},qs=s.questionMetrics||[],bd=m.displayBreakdown||s.displayResult?.scoreBreakdown||{};return `<div class="metric-guide"><div><b>方向一致 (Direction)</b><span>二人の心拍が同じ方向へ変化した割合</span></div><div><b>反応の大きさ (Magnitude)</b><span>基準時と比べた心拍変化の大きさ</span></div><div><b>時間同期 (Temporal r)</b><span>少しの時間差を含めた反応タイミングの似かた</span></div><div><b>反応バランス (Balance)</b><span>二人の反応量がどの程度近いか</span></div><div><b>質問反応量 (Q Response)</b><span>質問によって心拍がどれだけ動いたか</span></div></div><div class="grid5"><div class="kpi"><small>方向一致 (Direction)</small><strong>${num(m.direction,1)}</strong></div><div class="kpi"><small>反応の大きさ (Magnitude)</small><strong>${num(m.magnitude,2)}</strong></div><div class="kpi"><small>時間同期 (Temporal r)</small><strong>${num(m.temporal,2)}</strong></div><div class="kpi"><small>反応バランス (Balance)</small><strong>${num(m.balance,1)}</strong></div><div class="kpi"><small>質問反応量 (Q Response)</small><strong>${num(m.questionResponse,2)}</strong></div></div>${Number.isFinite(bd.syncScore)?`<div class="grid2 score-breakdown-record"><div class="kpi"><small>心拍シンクロ表示値 (SYNC)</small><strong>${Math.round(bd.syncScore)}</strong></div><div class="kpi"><small>心拍リアクション表示値 (REACTION)</small><strong>${Math.round(bd.reactionScore)}</strong></div></div>`:''}<h3 style="margin-top:24px">質問別 (Question level)</h3>${qs.length?`<div class="table-wrap"><table class="records-table"><thead><tr><th>番号 (Q)</th><th>質問 (Question)</th><th>方向一致 (Direction)</th><th>反応量 (Magnitude)</th><th>時間同期 (Temporal)</th><th>時間差 (Lag)</th><th>バランス (Balance)</th><th>質問反応 (Q Response)</th></tr></thead><tbody>${qs.map((x,i)=>x.skipped?`<tr class="skipped-row"><td>${i+1}</td><td>${esc(x.question?.questionText||'')}</td><td colspan="6"><span class="na-value">質問スキップ (QUESTION_SKIPPED) · 集計対象外</span></td></tr>`:`<tr><td>${i+1}</td><td>${esc(x.question?.questionText||'')}</td><td>${metricCell(x.direction?.directionSync,x.direction?.reason,1)}</td><td>${metricCell(x.pairMagnitude,null,2)}</td><td>${metricCell(x.temporal?.rMax,x.temporal?.reason,2)}</td><td>${Number.isFinite(x.temporal?.bestLag)?`${x.temporal.bestLag} 秒`:'算出不可 (NA)'}</td><td>${metricCell(x.balance?.balance,x.balance?.reason,1)}</td><td>${metricCell(x.pairQResponse,null,2)}</td></tr>`).join('')}</tbody></table></div>`:'<p class="subtitle">このセッションには質問別指標がまだ保存されていません。</p>'}`;}
 async function recordsQuestionnaireTab(s){
-  const stages=s.childSupport?['pre','post','childPost']:['pre','post'];
+  if(s.protocolId!=='RESEARCH_V1')return '<div class="callout info"><b>イベントモードではアンケートを実施しません。</b><br>このタブにイベント用アンケートデータは保存されません。</div>';
+  const stages=['pre','post'];
   const vals=await Promise.all(['A','B'].flatMap(side=>stages.map(stage=>backend.loadSurvey(s.sessionId,side,stage))));let idx=0;
-  const surveyHtml=`<div class="grid2">${['A','B'].map(side=>`<section><h3>参加者${side} (Participant ${side})</h3>${stages.map(stage=>surveyRecordBlock(stage,vals[idx++])).join('')}</section>`).join('')}</div>`;
-  const cc=s.childConditionCheck||{};
-  return `${surveyHtml}${s.childSupport?`<section class="record-survey" style="margin-top:18px"><b>こどもサポート 体調・装着確認</b><div class="metric-row"><span>保存時刻</span><b>${cc.savedAt?new Date(cc.savedAt).toLocaleString('ja-JP'):'未保存'}</b></div><div class="metric-row"><span>確認内容</span><b>${(cc.values||[]).map(x=>CONDITION_LABELS[x]||x).join(' / ')||'—'}</b></div></section>`:''}`;
+  return `<div class="grid2">${['A','B'].map(side=>`<section><h3>参加者${side} (Participant ${side})</h3>${stages.map(stage=>surveyRecordBlock(stage,vals[idx++])).join('')}</section>`).join('')}</div>`;
 }
-function surveyRecordBlock(stage,row){const title=stage==='pre'?'測定前 (PRE)':stage==='post'?'測定後 (POST)':'こどもアンケート (CHILD POST)';if(!row)return `<div class="record-survey"><b>${title}</b><p class="mini">未回答</p></div>`;const d=row.data||row;const faceMap={0:'ちがう',1:'すこし',2:'そう！'};const formatSurveyValue=(k,v)=>{if(k==='condition'&&Array.isArray(v))return v.map(x=>CONDITION_LABELS[x]||x).join(' / ');if(v===null)return 'わからない / 回答なし (NA)';if(/^C\d$/.test(k)&&Number.isFinite(Number(v)))return `${faceMap[Number(v)]||v} (${v})`;if(typeof v==='boolean')return v?'はい (true)':'いいえ (false)';return Array.isArray(v)?v.join(', '):String(v);};return `<div class="record-survey"><b>${title}</b>${Object.entries(d).filter(([k])=>!['submittedFromRole','consentVersion'].includes(k)).map(([k,v])=>`<div class="metric-row"><span>${esc(SURVEY_ITEM_LABELS[k]||k)}</span><b>${esc(formatSurveyValue(k,v))}</b></div>`).join('')}</div>`;}
+function surveyRecordBlock(stage,row){const title=stage==='pre'?'測定前 (PRE)':'測定後 (POST)';if(!row)return `<div class="record-survey"><b>${title}</b><p class="mini">未回答</p></div>`;const d=row.data||row;const formatSurveyValue=(k,v)=>{if(k==='condition'&&Array.isArray(v))return v.map(x=>CONDITION_LABELS[x]||x).join(' / ');if(v===null)return '回答なし (NA)';if(typeof v==='boolean')return v?'はい (true)':'いいえ (false)';return Array.isArray(v)?v.join(', '):String(v);};return `<div class="record-survey"><b>${title}</b>${Object.entries(d).filter(([k])=>!['submittedFromRole','consentVersion'].includes(k)).map(([k,v])=>`<div class="metric-row"><span>${esc(SURVEY_ITEM_LABELS[k]||k)}</span><b>${esc(formatSurveyValue(k,v))}</b></div>`).join('')}</div>`;}
 function logDetailsHtml(details={}){const labels={category:'関係カテゴリ',displayId:'測定ID',protocolId:'実験方式',setOrder:'セット順',role:'端末役割',side:'側',stage:'段階',deviceId:'機器ID',readyAtMs:'準備完了時刻ms',t0:'開始時刻ms',phase:'フェーズ',pauseDurationMs:'停止時間ms',quality:'品質',score:'スコア',reason:'理由',from:'変更前',to:'変更後'};const entries=Object.entries(details||{});if(!entries.length)return '—';return `<div class="log-details">${entries.map(([k,v])=>`<span><b>${esc(labels[k]||k)} (${esc(k)})</b>: ${esc(k==='protocolId'?protocolLabel(v):k==='role'||k==='from'||k==='to'?roleLabel(v):k==='phase'?phaseLabel(v):k==='quality'?qualityLabel(v):k==='reason'?(v==='SENSOR_LOSS'?'心拍センサー切断 (SENSOR_LOSS)':v==='MANUAL'?'手動 (MANUAL)':String(v)):String(v))}</span>`).join('')}</div>`;}
 async function recordsQualityTab(s){const logs=await backend.listAuditLogs(s.sessionId);const q=s.quality||s.metrics?.quality||{};return `<div class="grid4"><div class="kpi"><small>データ品質 (Quality)</small><strong>${esc(qualityLabel(q.label))}</strong></div><div class="kpi"><small>A 取得率 (Coverage A)</small><strong>${Number.isFinite(q.coverageA)?(q.coverageA*100).toFixed(1)+'%':'—'}</strong></div><div class="kpi"><small>B 取得率 (Coverage B)</small><strong>${Number.isFinite(q.coverageB)?(q.coverageB*100).toFixed(1)+'%':'—'}</strong></div><div class="kpi"><small>最大連続欠測 (Max continuous gap)</small><strong>${Number.isFinite(q.maxContinuousGapSec)?q.maxContinuousGapSec+' 秒':'—'}</strong></div></div><h3 style="margin-top:24px">操作・イベントログ (Operation / event log)</h3>${logs.length?`<table class="records-table"><thead><tr><th>時刻 (Time)</th><th>イベント (Event)</th><th>端末役割 (Role)</th><th>詳細 (Details)</th></tr></thead><tbody>${logs.map(x=>`<tr><td>${new Date(x.timestamp||0).toLocaleString('ja-JP')}</td><td>${esc(EVENT_LABELS[x.eventType]||x.eventType||'')}</td><td>${esc(roleLabel(x.actorRole))}</td><td>${logDetailsHtml(x.details||{})}</td></tr>`).join('')}</tbody></table>`:'<p class="subtitle">ログはありません。</p>'}`;}
 async function recordsRawTab(s){const [a,b]=await Promise.all([backend.loadHr(s.sessionId,'A'),backend.loadHr(s.sessionId,'B')]);const rows=[...a.map(x=>({...x,side:'A'})),...b.map(x=>({...x,side:'B'}))].sort((x,y)=>x.sessionElapsedMs-y.sessionElapsedMs).slice(0,200);return `<div class="callout info">生データ (RAW) は読み取り専用です。先頭200行を表示しています。解析では受信時刻から1秒系列を作り、sequence値そのものは欠測判定に使いません。</div><div class="table-wrap"><table class="records-table raw-table"><thead><tr><th>側 (Side)</th><th>経過ms (Elapsed ms)</th><th>心拍数 (BPM)</th><th>フェーズ (Phase)</th><th>セット (Set)</th><th>質問 (Q)</th><th>時刻ms (Timestamp)</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${x.side}</td><td>${Math.round(x.sessionElapsedMs||0)}</td><td>${x.bpm}</td><td>${esc(phaseLabel(x.phase))}</td><td>${x.setIndex??''}</td><td>${x.questionIndex??''}</td><td>${Math.round(x.timestampMs||0)}</td></tr>`).join('')}</tbody></table></div>`;}
@@ -666,8 +609,6 @@ function bind(){
   }
   const pin=document.querySelector('#records-pin');if(pin)pin.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();handleAction('unlock-records',document.querySelector('[data-action="unlock-records"]'));}});
   syncSessionCreationForm();
-  const childToggle=document.querySelector('#child-support');if(childToggle)childToggle.addEventListener('change',syncChildSupportOptions);
-  const childConditions=[...document.querySelectorAll('input[name="child-condition"]')];for(const c of childConditions)c.addEventListener('change',()=>{if(c.value==='none'&&c.checked)childConditions.filter(x=>x!==c).forEach(x=>x.checked=false);else if(c.checked){const none=childConditions.find(x=>x.value==='none');if(none)none.checked=false;}});
 }
 function bindDynamic(){
   document.querySelectorAll('[data-session-open]').forEach(el=>el.addEventListener('click',()=>{state.recordsSelectedSessionId=el.dataset.sessionOpen;state.recordsTab='overview';renderRecordsBody();}));
@@ -680,10 +621,10 @@ function bindDynamic(){
 async function handleAction(a,el){
   if(a==='display-home')return clearRole();if(a==='home')return clearRole();if(a==='create-session')return createSession();if(a==='join-session')return joinSession();
   if(a==='connect-hw9')return connectSensor(false);if(a==='connect-demo')return connectSensor(true);
-  if(a==='open-pre-survey'){state.surveyStage='pre';state.surveySide=roleSide();return render();}if(a==='open-post-survey'){state.surveyStage='post';state.surveySide=roleSide();return render();}if(a==='open-child-survey'){const side=roleSide();if(!isChildSurveyTarget(state.session,side))return;state.surveyStage='child-post';state.surveySide=side;return render();}
+  if(a==='open-pre-survey'){state.surveyStage='pre';state.surveySide=roleSide();return render();}if(a==='open-post-survey'){state.surveyStage='post';state.surveySide=roleSide();return render();}
   if(a==='cancel-survey'){if(confirm('アンケートを閉じて運用画面へ戻りますか？入力中の内容は保存されません。')){state.surveyStage=null;state.surveySide=null;render();}return;}
   if(a==='staff-return'){if(confirm('実験担当者の操作画面へ戻りますか？')){state.surveyLocked=null;await refreshSession();render();}return;}
-  if(a==='save-child-condition')return saveChildCondition();if(a==='skip-question')return skipCurrentQuestion();if(a==='start-acclim')return startAcclim();if(a==='start-measure')return startMeasure();if(a==='pause')return pauseMeasure();if(a==='resume')return resumeMeasure();if(a==='abort')return abortMeasure();if(a==='calculate')return calculateResults();
+  if(a==='skip-question')return skipCurrentQuestion();if(a==='start-acclim')return startAcclim();if(a==='start-measure')return startMeasure();if(a==='pause')return pauseMeasure();if(a==='resume')return resumeMeasure();if(a==='abort')return abortMeasure();if(a==='calculate')return calculateResults();
   if(a==='transfer-controller')return transferController();if(a==='intro-prev')return setIntroPage(-1);if(a==='intro-next')return setIntroPage(1);
   if(a==='unlock-records'){const pin=document.querySelector('#records-pin')?.value||'';try{await verifyRecordsPin(pin);render();}catch(e){alert(e?.message||'PINを確認できませんでした。');}return;}
   if(a==='lock-records'){lockRecords();state.recordsSelectedSessionId=null;return render();}

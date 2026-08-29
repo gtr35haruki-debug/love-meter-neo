@@ -41,9 +41,14 @@ export const QUESTION_BANK = {
   },
 };
 
-// EVENT_V2: 2026-08 approved event question bank.
-// The five categories below are shared by standard event display and CHILD_SUPPORT_V1.
-export const EVENT_QUESTION_BANK_V2 = {
+// EVENT_V2: 2026-08 event question bank.
+// v0.3.1 adds the 恋人 category. Event sessions do not use questionnaires.
+export const EVENT_QUESTION_BANK_V3 = {
+  '恋人': {
+    A: ['初めて会ったときの相手の印象は？','相手の好きなところは？','今度、二人で何をしたい？'],
+    B: ['最近、二人で一番楽しかったことは？','相手の意外な一面は？','二人で行ってみたい場所は？'],
+    C: ['二人で一番思い出に残っていることは？','相手に「ありがとう」と伝えたいことは？','これから二人で楽しみにしていることは？'],
+  },
   '初対面': {
     A: ['好きな食べ物は？ お互いに教えてください。','好きな遊びやスポーツは？','休みの日は何をして過ごすのが好き？'],
     B: ['好きな季節は？ どうして？','好きな動物は？','行ってみたい場所は？'],
@@ -71,20 +76,14 @@ export const EVENT_QUESTION_BANK_V2 = {
   },
 };
 
-export const EVENT_RELATIONSHIP_CATEGORIES = Object.freeze(['初対面','友達','親子','兄弟・姉妹','夫婦']);
+export const EVENT_RELATIONSHIP_CATEGORIES = Object.freeze(['恋人','友達','親子','兄弟・姉妹','夫婦','初対面']);
 
 export function getQuestionBankForProtocol(protocolId){
-  return protocolId==='EVENT_V2' ? EVENT_QUESTION_BANK_V2 : QUESTION_BANK;
+  return protocolId==='EVENT_V2' ? EVENT_QUESTION_BANK_V3 : QUESTION_BANK;
 }
 
 export function getQuestionCategoriesForProtocol(protocolId){
   return protocolId==='EVENT_V2' ? EVENT_RELATIONSHIP_CATEGORIES : Object.keys(QUESTION_BANK);
-}
-
-export function childReadAloudPrompt(questionText=''){
-  const q=String(questionText||'').trim();
-  if(!q) return '';
-  return `二人とも、このしつもんにこたえてみてね。「${q}」`;
 }
 
 export { RELATIONSHIP_OPTIONS } from './survey-schema.js';
