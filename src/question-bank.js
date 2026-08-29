@@ -86,4 +86,10 @@ export function getQuestionCategoriesForProtocol(protocolId){
   return protocolId==='EVENT_V2' ? EVENT_RELATIONSHIP_CATEGORIES : Object.keys(QUESTION_BANK);
 }
 
+export function childReadAloudPrompt(questionText=''){
+  const q=String(questionText||'').trim();
+  if(!q) return '';
+  return `二人とも、このしつもんにこたえてみてね。「${q}」`;
+}
+
 export { RELATIONSHIP_OPTIONS } from './survey-schema.js';

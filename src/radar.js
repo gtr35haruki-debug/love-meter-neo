@@ -1,5 +1,5 @@
-export function radarSvg(values, size=420){
-  const labels=[['息ぴったり','direction'],['ドキドキ','magnitude'],['同時リアクション','temporal'],['リアクションバランス','balance'],['質問ヒット','questionResponse']];
+export function radarSvg(values, size=420, child=false){
+  const labels=child?[['いっしょにうごいた','direction'],['ドキドキ','magnitude'],['タイミング','temporal'],['バランス','balance'],['しつもん反応','questionResponse']]:[['息ぴったり','direction'],['ドキドキ','magnitude'],['同時リアクション','temporal'],['リアクションバランス','balance'],['質問ヒット','questionResponse']];
   const c=size/2,r=size*.32;
   const pt=(i,scale=1)=>{const a=-Math.PI/2+i*2*Math.PI/5;return [c+Math.cos(a)*r*scale,c+Math.sin(a)*r*scale]};
   const poly=(scale)=>labels.map((_,i)=>pt(i,scale).join(',')).join(' ');
