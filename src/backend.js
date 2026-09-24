@@ -1,8 +1,8 @@
-import { CONFIG } from './config.js';
+import { CONFIG } from './config.js?v=0.3.4';
 
 const impl = CONFIG.backendMode === 'firebase'
-  ? await import('./firebase-backend.js')
-  : await import('./local-backend.js');
+  ? await import('./firebase-backend.js?v=0.3.4')
+  : await import('./local-backend.js?v=0.3.4');
 
 export const subscribe = impl.subscribe;
 export const createSession = impl.createSession;
@@ -14,6 +14,7 @@ export const loadHr = impl.loadHr;
 export const saveSurvey = impl.saveSurvey;
 export const loadSurvey = impl.loadSurvey;
 export const allSessions = impl.allSessions;
+export const loadExportBundle = impl.loadExportBundle;
 export const chooseSetOrder = impl.chooseSetOrder;
 export const allocateDisplayId = impl.allocateDisplayId;
 export const allocateParticipantId = impl.allocateParticipantId;

@@ -1,5 +1,5 @@
-import { CONFIG, APP_VERSION } from './config.js';
-import { putHr, getHr as getLocalHr, putSurvey, getSurvey as getLocalSurvey, putOutbox, deleteOutbox, listOutbox } from './idb.js';
+import { CONFIG, APP_VERSION } from './config.js?v=0.3.4';
+import { putHr, getHr as getLocalHr, putSurvey, getSurvey as getLocalSurvey, putOutbox, deleteOutbox, listOutbox } from './idb.js?v=0.3.4';
 
 const SDK='12.17.1';
 const [{initializeApp,getApps},{getDatabase,ref,set,update,get,onValue,runTransaction,onDisconnect,push},{getAuth,signInAnonymously,onAuthStateChanged}] = await Promise.all([
@@ -131,6 +131,32 @@ export async function saveSurvey(sessionId,side,stage,data){
 }
 export async function loadSurvey(sessionId,side,stage){try{const s=await get(ref(db,`questionnaires/${sessionId}/${side}/${stage}`));if(s.exists())return s.val();}catch{}return getLocalSurvey(sessionId,side,stage);}
 export async function allSessions(){const s=await get(ref(db,'session_meta'));return Object.values(s.val()||{});}
+
+/** Unlike the Records preview readers, export must fail loudly on a denied/offline cloud read. */
+export async function loadExportBundle(sessionId,{includeSurveys=true}={}){
+  if(!connected)throw new Error('Firebaseがオフラインです。');
+  const [meta,rawA,rawB,questionnaires,events]=await Promise.all([
+    get(ref(db,`session_meta/${sessionId}`)),
+    get(ref(db,`heart_rate_raw/${sessionId}/A`)),
+    get(ref(db,`heart_rate_raw/${sessionId}/B`)),
+    includeSurveys?get(ref(db,`questionnaires/${sessionId}`)):Promise.resolve(null),
+    get(ref(db,`audit_logs/${sessionId}`)),
+  ]);
+  if(!meta.exists())throw new Error(`セッション ${sessionId} がありません。`);
+  const merge=async(snap,side)=>{
+    const cloud=Object.values(snap.val()||{}),local=await getLocalHr(sessionId,side),out=new Map();
+    for(const x of [...cloud,...local])out.set(x.sampleId||JSON.stringify(x),x);
+    return [...out.values()].sort((a,b)=>(a.sessionElapsedMs||0)-(b.sessionElapsedMs||0));
+  };
+  const [a,b]=await Promise.all([merge(rawA,'A'),merge(rawB,'B')]);
+  const surv=questionnaires?.val()||{};
+  if(includeSurveys)for(const side of ['A','B'])for(const stage of ['pre','post'])if(!surv?.[side]?.[stage]){
+    const local=await getLocalSurvey(sessionId,side,stage);
+    if(local){surv[side]||={};surv[side][stage]=local;}
+  }
+  return {session:meta.val(),rawA:a,rawB:b,surveys:surv,auditLogs:Object.values(events.val()||{}).sort((x,y)=>(x.timestamp||0)-(y.timestamp||0))};
+}
+
 
 export async function appendAuditLog(sessionId,event){
   try{const r=push(ref(db,`audit_logs/${sessionId}`));await set(r,{...event,timestamp:event.timestamp||now(),actorUid:uid,actorRole:currentRole()});}catch(e){console.warn('audit log failed',e);}

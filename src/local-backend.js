@@ -1,4 +1,4 @@
-import { putSession, getSession, listSessions, putHr, getHr, putSurvey, getSurvey } from './idb.js';
+import { putSession, getSession, listSessions, putHr, getHr, putSurvey, getSurvey } from './idb.js?v=0.3.4';
 
 const CHANNEL='love-meter-neo-sync';
 const bc=('BroadcastChannel' in window)?new BroadcastChannel(CHANNEL):null;
@@ -55,4 +55,15 @@ export async function chooseSetOrder(protocolId,category,pa,pb,candidates){
   const last=[...same].reverse().find(x=>canonical(x.participantAId,x.participantBId)===canonical(pa,pb))?.setOrder;
   const nonrepeat=pool.filter(x=>x!==last);if(nonrepeat.length)pool=nonrepeat;
   return pool[Math.floor(Math.random()*pool.length)];
+}
+
+export async function loadExportBundle(sessionId,{includeSurveys=true}={}){
+  const session=await loadSession(sessionId);
+  if(!session)throw new Error(`セッション ${sessionId} がありません。`);
+  const [rawA,rawB,auditLogs]=await Promise.all([getHr(sessionId,'A'),getHr(sessionId,'B'),listAuditLogs(sessionId)]);
+  const surveys=includeSurveys?{
+    A:{pre:await getSurvey(sessionId,'A','pre'),post:await getSurvey(sessionId,'A','post')},
+    B:{pre:await getSurvey(sessionId,'B','pre'),post:await getSurvey(sessionId,'B','post')}
+  }:{};
+  return {session,rawA,rawB,auditLogs,surveys};
 }

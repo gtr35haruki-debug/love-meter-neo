@@ -1,4 +1,4 @@
-import { CONFIG } from './config.js';
+import { CONFIG } from './config.js?v=0.3.4';
 
 const mean = xs => xs.length ? xs.reduce((a,b)=>a+b,0)/xs.length : null;
 const median = xs => {

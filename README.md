@@ -1,6 +1,10 @@
-# LOVE METER NEO v0.3.2 — Event + Child Support Refined Build
+# LOVE METER NEO v0.3.4 — Full Research Data ZIP Export
 
-## v0.3.2 のイベント向け変更（2026-08-29）
+## v0.3.4 の追加機能（2026-09-24）
+
+Recordsで複数セッションを選択して、取れたRAW心拍・1Hz系列・研究指標・NEO SCORE・質問別解析・品質・操作ログを**1つのZIP**に保存できます。研究アンケートはオプションです。ZIPの `all_sessions.json` はこのチャットにアップロードして解析する用途にも対応しています。参照：`CHANGELOG_v0.3.4.md`、`GITHUB_UPDATE_GUIDE_v0.3.4.md`。
+
+## v0.3.3 のイベント向け変更（2026-08-29）
 
 - EVENT_V2 は **恋人 / 友達 / 親子 / 兄弟・姉妹 / 夫婦 / 初対面** の6カテゴリ、合計54問です。
 - `CHILD_SUPPORT_V1` を復活しました。質問内容と120秒の計測時間は通常EVENT_V2と同じで、表示・案内・スタッフ読み上げ補助だけを子ども向けにします。
@@ -9,7 +13,7 @@
 - スキップした質問はRAWを削除せず、`QUESTION_SKIPPED` として記録し、その質問だけ指標集計から除外します。残り時間は待機して共通タイムラインを維持します。
 - RESEARCH_V1の質問・アンケート・5指標・NEO SCORE計算、EVENTの120秒計測時間は変更していません。
 
-詳細は `CHANGELOG_v0.3.2.md` を参照してください。
+詳細は `CHANGELOG_v0.3.3.md` を参照してください。
 
 ## v0.2.2 の追加変更（2026-08-24 パイロット反映）
 

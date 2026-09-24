@@ -2,18 +2,19 @@ import {
   APP_VERSION, CONFIG, ROLE, SESSION_STATUS, QUESTION_BANK_VERSION, EVENT_QUESTION_BANK_VERSION,
   CHILD_SUPPORT_VERSION, EVENT_GUIDE_VERSION, CONSENT_VERSION,
   PREPROCESSING_VERSION, METRICS_VERSION, DISPLAY_SCORE_VERSION, DISPLAY_SCALE_VERSION
-} from './config.js';
-import { getQuestionBankForProtocol, getQuestionCategoriesForProtocol, childReadAloudPrompt } from './question-bank.js';
-import { PROTOCOLS, SET_ORDERS, buildTimeline, getPhaseAtElapsed, isEventProtocol } from './protocols.js';
+} from './config.js?v=0.3.4';
+import { getQuestionBankForProtocol, getQuestionCategoriesForProtocol, childReadAloudPrompt } from './question-bank.js?v=0.3.4';
+import { PROTOCOLS, SET_ORDERS, buildTimeline, getPhaseAtElapsed, isEventProtocol } from './protocols.js?v=0.3.4';
 import {
   RELATIONSHIP_OPTIONS, PRE_RELATIONSHIP_ITEMS, PRE_STATE_ITEMS, OPTIONAL_ITEM,
   CONDITION_OPTIONS, POST_ITEMS, CONSENT_TEXT
-} from './survey-schema.js';
-import * as backend from './backend.js';
-import { HeartRateSensor, DemoHeartRateSensor } from './bluetooth-hw9.js';
-import { computeSessionMetrics } from './metrics.js';
-import { radarSvg } from './radar.js';
-import { isRecordsUnlocked, verifyRecordsPin, lockRecords, touchRecordsActivity } from './admin-gate.js';
+} from './survey-schema.js?v=0.3.4';
+import * as backend from './backend.js?v=0.3.4';
+import { HeartRateSensor, DemoHeartRateSensor } from './bluetooth-hw9.js?v=0.3.4';
+import { computeSessionMetrics } from './metrics.js?v=0.3.4';
+import { buildExportFiles, zipFile, redact } from './research-export.js?v=0.3.4';
+import { radarSvg } from './radar.js?v=0.3.4';
+import { isRecordsUnlocked, verifyRecordsPin, lockRecords, touchRecordsActivity } from './admin-gate.js?v=0.3.4';
 
 const app=document.querySelector('#app');
 const state={
@@ -42,6 +43,8 @@ const state={
   recordsSearch:'',
   recordsProtocol:'ALL',
   recordsStatus:'ALL',
+  exportSelected:new Set(),
+  exportBusy:false,
 };
 
 const esc=(s='')=>String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
@@ -553,7 +556,10 @@ function filteredSessions(){const q=state.recordsSearch.toLowerCase();return sta
   if(!q)return true;return [s.displayId,s.participantAId,s.participantBId,s.canonicalPairKey,s.questionCategory].some(x=>String(x||'').toLowerCase().includes(q));
 });}
 function recordsListView(){
-  const rows=filteredSessions();return `<div class="panel records-panel"><div class="records-controls"><input id="records-search" placeholder="測定ID / 参加者ID / ペアを検索" value="${esc(state.recordsSearch)}"><select id="records-protocol"><option value="ALL">すべての実験方式 (Protocol)</option>${['RESEARCH_V1','EVENT_V2','EVENT_V1'].map(x=>`<option value="${x}" ${state.recordsProtocol===x?'selected':''}>${protocolLabel(x)}</option>`).join('')}</select><select id="records-status"><option value="ALL">すべての状態 (Status)</option>${Object.values(SESSION_STATUS).map(x=>`<option value="${x}" ${state.recordsStatus===x?'selected':''}>${statusLabel(x)}</option>`).join('')}</select></div><div class="table-wrap"><table class="records-table"><thead><tr><th>測定ID (Measurement)</th><th>日時 (Date)</th><th>実験方式 (Protocol)</th><th>ペア (Pair)</th><th>関係カテゴリ (Category)</th><th>状態 (Status)</th><th>品質 (Quality)</th><th>NEO SCORE</th></tr></thead><tbody>${rows.map(s=>`<tr class="clickable" data-session-open="${esc(s.sessionId)}"><td><b>${esc(s.displayId)}</b></td><td>${new Date(s.createdAt||0).toLocaleString('ja-JP')}</td><td>${esc(protocolLabel(s.protocolId))}</td><td>${esc(s.participantAId)} × ${esc(s.participantBId)}</td><td>${esc(s.questionCategory||'—')}</td><td>${esc(statusLabel(s.status))}</td><td>${esc(qualityLabel(s.quality?.label||s.metrics?.quality?.label))}</td><td>${Number.isFinite(s.displayResult?.neoScore)?Math.round(s.displayResult.neoScore):'—'}</td></tr>`).join('')}</tbody></table></div>${!rows.length?'<p class="subtitle">条件に一致する記録がありません。</p>':''}</div>`;
+  const rows=filteredSessions(),selected=state.exportSelected.size;
+  return `<div class="panel records-panel"><div class="records-controls"><input id="records-search" placeholder="測定ID / 参加者ID / ペアを検索" value="${esc(state.recordsSearch)}"><select id="records-protocol"><option value="ALL">すべての実験方式 (Protocol)</option>${['RESEARCH_V1','EVENT_V2','EVENT_V1'].map(x=>`<option value="${x}" ${state.recordsProtocol===x?'selected':''}>${protocolLabel(x)}</option>`).join('')}</select><select id="records-status"><option value="ALL">すべての状態 (Status)</option>${Object.values(SESSION_STATUS).map(x=>`<option value="${x}" ${state.recordsStatus===x?'selected':''}>${statusLabel(x)}</option>`).join('')}</select></div>
+    <div class="export-selection-bar"><span><b>${selected} 件</b> 選択中</span><button class="btn btn-quiet" data-action="export-select-visible">表示中をすべて選択</button><button class="btn btn-quiet" data-action="export-clear-selected">選択解除</button><button class="btn primary" data-action="export-open" ${selected?'':'disabled'}>選択した実験をまとめて書き出す →</button></div>
+    <div class="table-wrap"><table class="records-table"><thead><tr><th>選択</th><th>測定ID (Measurement)</th><th>日時 (Date)</th><th>実験方式 (Protocol)</th><th>ペア (Pair)</th><th>関係カテゴリ (Category)</th><th>状態 (Status)</th><th>品質 (Quality)</th><th>NEO SCORE</th></tr></thead><tbody>${rows.map(s=>`<tr class="clickable" data-session-open="${esc(s.sessionId)}"><td><input class="export-session-checkbox" type="checkbox" aria-label="${esc(s.displayId)} を選択" data-export-session="${esc(s.sessionId)}" ${state.exportSelected.has(s.sessionId)?'checked':''}></td><td><b>${esc(s.displayId)}</b></td><td>${new Date(s.createdAt||0).toLocaleString('ja-JP')}</td><td>${esc(protocolLabel(s.protocolId))}</td><td>${esc(s.participantAId)} × ${esc(s.participantBId)}</td><td>${esc(s.questionCategory||'—')}</td><td>${esc(statusLabel(s.status))}</td><td>${esc(qualityLabel(s.quality?.label||s.metrics?.quality?.label))}</td><td>${Number.isFinite(s.displayResult?.neoScore)?Math.round(s.displayResult.neoScore):'—'}</td></tr>`).join('')}</tbody></table></div>${!rows.length?'<p class="subtitle">条件に一致する記録がありません。</p>':''}</div>`;
 }
 function participantsView(){
   const map=new Map();for(const s of state.recordsCache)for(const id of [s.participantAId,s.participantBId]){if(!id)continue;const x=map.get(id)||{id,count:0,last:0,partners:new Set()};x.count++;x.last=Math.max(x.last,s.createdAt||0);const other=id===s.participantAId?s.participantBId:s.participantAId;if(other)x.partners.add(other);map.set(id,x);}
@@ -567,8 +573,20 @@ function analysisView(){
   const total=state.recordsCache.length,research=state.recordsCache.filter(x=>x.protocolId==='RESEARCH_V1').length,event=state.recordsCache.filter(x=>isEventProtocol(x.protocolId)).length,complete=state.recordsCache.filter(x=>x.status==='COMPLETE').length,good=state.recordsCache.filter(x=>(x.quality?.label||x.metrics?.quality?.label)==='GOOD').length;
   return `<div class="panel"><div class="section-title">分析 (ANALYSIS) · V1 BASIC</div><h2>データセット概要</h2><div class="grid5"><div class="kpi"><small>全件 (All)</small><strong>${total}</strong></div><div class="kpi"><small>研究 (Research)</small><strong>${research}</strong></div><div class="kpi"><small>イベント (Event)</small><strong>${event}</strong></div><div class="kpi"><small>完了 (Complete)</small><strong>${complete}</strong></div><div class="kpi"><small>良好 (GOOD)</small><strong>${good}</strong></div></div><div class="callout info" style="margin-top:18px">研究モード (RESEARCH_V1) とイベントモード (EVENT_V2 / 旧EVENT_V1) は統計的に混ぜず、フィルタ・エクスポート時も別の実験方式として扱います。</div></div>`;
 }
-function exportView(){return `<div class="panel"><div class="section-title">書き出し (EXPORT)</div><h2>研究データを書き出す</h2><p class="subtitle">標準出力に氏名は含めません。CSV / JSONの基本出力を用意しています。</p><div class="actions"><button class="btn primary" data-action="export-session-summary">セッション一覧CSV (session_summary.csv)</button><button class="btn" data-action="export-sessions-json">メタデータJSON (sessions_metadata.json)</button></div></div>`;}
-
+function exportView(){
+  const total=state.exportSelected.size;
+  return `<div class="panel"><div class="section-title">研究データ共有 (RESEARCH EXPORT / EXPORT_V1)</div><h2>複数の実験を、1つのZIPファイルに</h2>
+    <p class="subtitle">選択した実験のRAW心拍A/B（全件）、1Hz補正後の心拍、保存済み5指標・質問別結果・NEO SCORE・品質・質問・イベントログをまとめて保存します。研究用アンケートも追加できます。</p>
+    <div class="export-selection-bar"><span>選択中：<b>${total} セッション</b></span><button class="btn btn-quiet" data-action="export-select-visible">表示中をすべて選択</button><button class="btn btn-quiet" data-action="export-select-all">全セッションを選択</button><button class="btn btn-quiet" data-action="export-clear-selected">選択解除</button></div>
+    <div class="export-selected-list">${state.recordsCache.filter(s=>state.exportSelected.has(s.sessionId)).map(s=>`<span>${esc(s.displayId||s.sessionId)}　${esc(s.questionCategory||'')}　${esc(s.status||'')}</span>`).join('')||'<span>「記録」画面でチェックするか、ここで全セッションを選択してください。</span>'}</div>
+    <div class="export-options"><label class="export-option"><input type="checkbox" id="export-surveys"> <span>研究アンケートも含める（個別回答・任意の恋愛項目を含むことがあります）</span></label><label class="export-option"><input type="checkbox" id="export-free-text" disabled> <span>自由記述・「その他」入力も含める（個人情報が書かれていないか送信前に確認）</span></label></div>
+    <div class="callout info">研究ID・計測時刻は解析に必要なため保持します。氏名／端末ID／認証情報／セッション参加コードは書き出しません。研究IDも複数記録の照合が可能なため、共有相手を確認してください。アンケートの内容は相手の参加者に見せないでください。</div>
+    <div class="callout warn">取りこぼし防止：書き出し前に計測端末A・Bをオンラインに戻し、未送信データの同期を確認してください。取得に失敗した場合は不完全なZIPを作りません。</div>
+    <div class="actions"><button class="btn primary" data-action="export-full-zip" ${!total||state.exportBusy?'disabled':''}>${state.exportBusy?'ZIPを準備中…':`選択した${total}件の全データを1つのZIPに保存`}</button></div>
+    <p class="subtitle export-progress" id="export-progress" aria-live="polite"></p>
+    <hr class="export-divider"><h3>従来の軽量エクスポート</h3><div class="actions"><button class="btn" data-action="export-session-summary">セッション一覧CSV</button><button class="btn" data-action="export-sessions-json">メタデータJSON</button></div>
+    </div>`;
+}
 async function renderSessionDetail(el){
   const s=state.recordsCache.find(x=>x.sessionId===state.recordsSelectedSessionId)||await backend.loadSession(state.recordsSelectedSessionId);if(!s){state.recordsSelectedSessionId=null;el.innerHTML=recordsListView();return;}
   const tabs=[['overview','概要 (Overview)'],['heart','心拍数 (Heart Rate)'],['metrics','指標 (Metrics)'],['questionnaire','アンケート (Questionnaire)'],['quality','品質・ログ (Quality & Logs)'],['raw','生データ (Raw Data)']];
@@ -604,6 +622,42 @@ function downloadText(name,text,type='text/plain;charset=utf-8'){const blob=new 
 function exportSessionSummary(){const rows=[['display_id','session_uuid','created_at','protocol','participant_a','participant_b','question_category','set_order','status','quality','neo_score','app_version'],...state.recordsCache.map(s=>[s.displayId,s.sessionId,new Date(s.createdAt||0).toISOString(),s.protocolId,s.participantAId,s.participantBId,s.questionCategory,s.setOrder,s.status,s.quality?.label||s.metrics?.quality?.label||'',s.displayResult?.neoScore??'',s.appVersion])];downloadText('session_summary.csv','\ufeff'+rows.map(r=>r.map(csvEscape).join(',')).join('\r\n'),'text/csv;charset=utf-8');}
 async function exportCurrentRaw(){const s=state.recordsCache.find(x=>x.sessionId===state.recordsSelectedSessionId);if(!s)return;const [a,b]=await Promise.all([backend.loadHr(s.sessionId,'A'),backend.loadHr(s.sessionId,'B')]);const rows=[['session_id','participant_id','side','sample_id','sequence','bpm','timestamp_ms','session_elapsed_ms','phase','phase_elapsed_ms','set_index','question_index','sync_offset_ms'],...a.map(x=>[s.displayId,s.participantAId,'A',x.sampleId,x.sequence,x.bpm,x.timestampMs,x.sessionElapsedMs,x.phase,x.phaseElapsedMs,x.setIndex,x.questionIndex,x.syncOffsetMs]),...b.map(x=>[s.displayId,s.participantBId,'B',x.sampleId,x.sequence,x.bpm,x.timestampMs,x.sessionElapsedMs,x.phase,x.phaseElapsedMs,x.setIndex,x.questionIndex,x.syncOffsetMs])];downloadText(`${s.displayId}_heart_rate_raw.csv`,'\ufeff'+rows.map(r=>r.map(csvEscape).join(',')).join('\r\n'),'text/csv;charset=utf-8');}
 
+async function exportFullZip(){
+  if(state.exportBusy||!isRecordsUnlocked())return;
+  const ids=[...state.exportSelected].filter(id=>state.recordsCache.some(s=>s.sessionId===id));
+  if(!ids.length){alert('書き出したいセッションを選択してください。');return;}
+  const includeSurveys=!!document.querySelector('#export-surveys')?.checked;
+  const includeFreeText=includeSurveys&&!!document.querySelector('#export-free-text')?.checked;
+  const warning=includeSurveys?'\n\n※個別のアンケート回答も含みます。相手の参加者には公開しないでください。':'';
+  if(!confirm(`${ids.length}件の実験データを、RAW心拍を含む1つのZIPに保存します。${warning}\n\n続けますか？`))return;
+  state.exportBusy=true;
+  const button=document.querySelector('[data-action="export-full-zip"]'),progress=document.querySelector('#export-progress');
+  if(button){button.disabled=true;button.textContent='収集中…';}
+  const report=s=>{if(progress)progress.textContent=s;};
+  try{
+    if(CONFIG.backendMode==='firebase'&&!backend.getBackendStatus()?.connected)throw new Error('Firebaseがオフラインです。計測PCを同期してから再度お試しください。');
+    const bundles=[];
+    for(let i=0;i<ids.length;i++){
+      if(!isRecordsUnlocked())throw new Error('記録画面がロックされました。PINを入力し直してから書き出してください。');
+      const id=ids[i];report(`取得中 ${i+1}/${ids.length}：${state.recordsCache.find(s=>s.sessionId===id)?.displayId||id}`);
+      const bundle=await backend.loadExportBundle(id,{includeSurveys});
+      if(!bundle?.session)throw new Error(`${id} のセッション情報が取得できませんでした。`);
+      if(bundle.session.status==='COMPLETE'&&(!bundle.rawA?.length||!bundle.rawB?.length))throw new Error(`${bundle.session.displayId||id} のRAW心拍A/Bが揃っていません。アップロード状況を確認してください。`);
+      bundles.push(bundle);
+    }
+    if(!isRecordsUnlocked())throw new Error('記録画面がロックされました。ZIPは作成されませんでした。');
+    report(`取得完了 ${ids.length}/${ids.length}。ZIPを作成しています…`);
+    const result=buildExportFiles(bundles,{includeSurveys,includeFreeText});
+    const archive=zipFile(result.files);
+    if(archive.size>150*1024*1024&&!confirm(`ZIPが約${(archive.size/1024/1024).toFixed(1)}MBあります。保存を続けますか？`)){report('大容量のため保存を中止しました。');return;}
+    if(!isRecordsUnlocked())throw new Error('記録画面がロックされました。ZIPは保存されませんでした。');
+    const url=URL.createObjectURL(archive),link=document.createElement('a');link.href=url;link.download=result.filename;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),60000);
+    const warnings=result.manifest.manifest.flatMap(x=>x.warnings.map(w=>x.displayId+'：'+w));
+    report(`${ids.length}件のZIP保存を開始しました。RAW A/B・指標・質問・ログを収録。${warnings.length?` 要確認 ${warnings.length}件（ZIP内READMEを確認）`:''}`);
+  }catch(e){console.error('research export failed',e);report('書き出し失敗：'+String(e?.message||e));alert('ZIPを作成できませんでした。\n不完全なファイルは保存していません。\n'+String(e?.message||e));}
+  finally{state.exportBusy=false;if(button){button.disabled=false;button.textContent=`選択した${state.exportSelected.size}件の全データを1つのZIPに保存`;}}
+}
+
 function bind(){
   document.querySelectorAll('[data-role]').forEach(el=>el.addEventListener('click',()=>chooseRole(el.dataset.role)));
   document.querySelectorAll('[data-action]').forEach(el=>el.addEventListener('click',()=>handleAction(el.dataset.action,el)));
@@ -620,7 +674,9 @@ function bind(){
   syncSessionCreationForm();
 }
 function bindDynamic(){
-  document.querySelectorAll('[data-session-open]').forEach(el=>el.addEventListener('click',()=>{state.recordsSelectedSessionId=el.dataset.sessionOpen;state.recordsTab='overview';renderRecordsBody();}));
+  document.querySelectorAll('[data-session-open]').forEach(el=>el.addEventListener('click',e=>{if(e.target.closest('input,button,label,a'))return;state.recordsSelectedSessionId=el.dataset.sessionOpen;state.recordsTab='overview';renderRecordsBody();}));
+  document.querySelectorAll('[data-export-session]').forEach(el=>el.addEventListener('change',()=>{if(el.checked)state.exportSelected.add(el.dataset.exportSession);else state.exportSelected.delete(el.dataset.exportSession);renderRecordsBody();}));
+  const surveys=document.querySelector('#export-surveys'),free=document.querySelector('#export-free-text');if(surveys&&free)surveys.addEventListener('change',()=>{free.disabled=!surveys.checked;if(!surveys.checked)free.checked=false;});
   document.querySelectorAll('[data-action]').forEach(el=>{if(!el.dataset.bound){el.dataset.bound='1';el.addEventListener('click',()=>handleAction(el.dataset.action,el));}});
   const q=document.querySelector('#records-search');if(q)q.addEventListener('input',()=>{state.recordsSearch=q.value;renderRecordsBody();});
   const p=document.querySelector('#records-protocol');if(p)p.addEventListener('change',()=>{state.recordsProtocol=p.value;renderRecordsBody();});
@@ -641,9 +697,14 @@ async function handleAction(a,el){
   if(a==='records-view'){state.recordsView=el.dataset.view||'records';state.recordsSelectedSessionId=null;state.recordsTab='overview';render();return;}
   if(a==='records-back'){state.recordsSelectedSessionId=null;return renderRecordsBody();}
   if(a==='record-tab'){state.recordsTab=el.dataset.tab||'overview';return renderRecordsBody();}
+  if(a==='export-select-visible'){filteredSessions().forEach(s=>state.exportSelected.add(s.sessionId));return renderRecordsBody();}
+  if(a==='export-select-all'){state.recordsCache.forEach(s=>state.exportSelected.add(s.sessionId));return renderRecordsBody();}
+  if(a==='export-clear-selected'){state.exportSelected.clear();return renderRecordsBody();}
+  if(a==='export-open'){state.recordsView='export';state.recordsSelectedSessionId=null;return renderRecordsBody();}
+  if(a==='export-full-zip')return exportFullZip();
   if(a==='export-session-summary')return exportSessionSummary();
-  if(a==='export-sessions-json')return downloadText('sessions_metadata.json',JSON.stringify(state.recordsCache,null,2),'application/json');
-  if(a==='export-current-json'){const s=state.recordsCache.find(x=>x.sessionId===state.recordsSelectedSessionId);if(s)downloadText(`${s.displayId}.json`,JSON.stringify(s,null,2),'application/json');return;}
+  if(a==='export-sessions-json')return downloadText('sessions_metadata.json',JSON.stringify(redact(state.recordsCache),null,2),'application/json');
+  if(a==='export-current-json'){const s=state.recordsCache.find(x=>x.sessionId===state.recordsSelectedSessionId);if(s)downloadText(`${s.displayId}.json`,JSON.stringify(redact(s),null,2),'application/json');return;}
   if(a==='export-current-raw')return exportCurrentRaw();
 }
 
