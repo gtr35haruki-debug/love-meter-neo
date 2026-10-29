@@ -66,6 +66,61 @@ async function structuredResponse({instructions,input,name,schema}){
   try{return JSON.parse(text);}catch{throw new HttpsError('internal','AI returned an unreadable structured response.');}
 }
 
+
+async function transcribeAudioBuffer({audio,mimeType='audio/webm',side='?'}){
+  const form=new FormData();
+  form.append('file',new Blob([audio],{type:mimeType}),'love-meter-question.webm');
+  form.append('model','gpt-transcribe');
+  form.append('prompt',`日本語の短い二人会話です。このファイルは参加者${side}の口元マイクです。LOVE METER、心拍、ダイフェスタ等の固有語が出ることがあります。主にこのマイクの装着者の発話を忠実に文字起こししてください。遠くの相手の声や重複した回り込み音は、明瞭でない限り補完しないでください。`);
+  const transcriptBody=await openaiFetch('/audio/transcriptions',{method:'POST',body:form});
+  return String(transcriptBody?.text||'').trim();
+}
+
+exports.transcribeParticipantAudio=onCall({secrets:[OPENAI_API_KEY],timeoutSeconds:60,memory:'512MiB'},async req=>{
+  if(!req.auth)throw new HttpsError('unauthenticated','Authentication required.');
+  const audioBase64=String(req.data?.audioBase64||'');
+  const mimeType=String(req.data?.mimeType||'audio/webm').slice(0,80);
+  const side=String(req.data?.side||'').toUpperCase()==='B'?'B':'A';
+  if(!audioBase64)throw new HttpsError('invalid-argument','Audio is required.');
+  const audio=Buffer.from(audioBase64,'base64');
+  if(!audio.length||audio.length>4*1024*1024)throw new HttpsError('invalid-argument','Audio size is invalid.');
+  const transcript=await transcribeAudioBuffer({audio,mimeType,side});
+  return {ok:true,side,transcript,transcriptionModel:'gpt-transcribe'};
+});
+
+exports.analyzeConversationTranscripts=onCall({secrets:[OPENAI_API_KEY],timeoutSeconds:30,memory:'256MiB'},async req=>{
+  if(!req.auth)throw new HttpsError('unauthenticated','Authentication required.');
+  const questionText=String(req.data?.questionText||'').slice(0,500);
+  const transcriptA=String(req.data?.transcriptA||'').slice(0,6000).trim();
+  const transcriptB=String(req.data?.transcriptB||'').slice(0,6000).trim();
+  if(!transcriptA&&!transcriptB)return {ok:true,analysis:null,bonus:0};
+  const schema={type:'object',additionalProperties:false,properties:{
+    questionEngagement:{type:'integer',minimum:0,maximum:100},
+    mutualResponse:{type:'integer',minimum:0,maximum:100},
+    selfDisclosure:{type:'integer',minimum:0,maximum:100},
+    emotionalExpression:{type:'integer',minimum:0,maximum:100},
+    conversationalRichness:{type:'integer',minimum:0,maximum:100},
+    bonus:{type:'integer',minimum:0,maximum:2},
+    summary:{type:'string',maxLength:120},
+    evidence:{type:'array',items:{type:'string',maxLength:80},maxItems:3},
+  },required:['questionEngagement','mutualResponse','selfDisclosure','emotionalExpression','conversationalRichness','bonus','summary','evidence']};
+  const analysis=await structuredResponse({
+    name:'love_meter_dual_talk_analysis',schema,
+    instructions:[
+      'あなたはLOVE METERの会話内容分析モジュールです。',
+      'A/Bは別々の口元マイクの文字起こしです。各トラックは主にその参加者の発話を示します。',
+      'マイクの回り込みで同じ発話が両方に重複している可能性があります。明らかな重複は会話往復として二重計上しないでください。',
+      '文字起こしに実際に現れている会話特徴だけを評価してください。',
+      '恋愛感情、親密さ、相性、性格、関係の良し悪しを推測・断定してはいけません。',
+      'questionEngagementは質問に沿って話している程度、mutualResponseは相手の発話を受けた応答の程度を評価します。',
+      'bonusはエンタメ用の小さな加点です。0=特徴が読み取りにくい、1=会話特徴がある、2=複数の明確な特徴がある。',
+      'summaryとevidenceは短い日本語にしてください。',
+    ].join('\\n'),
+    input:`質問: ${questionText||'（不明）'}\\n\\n参加者Aの主音声文字起こし:\\n${transcriptA||'（なし）'}\\n\\n参加者Bの主音声文字起こし:\\n${transcriptB||'（なし）'}`,
+  });
+  return {ok:true,analysis,bonus:analysis.bonus,model:ANALYSIS_MODEL};
+});
+
 exports.analyzeConversation=onCall({secrets:[OPENAI_API_KEY],timeoutSeconds:60,memory:'512MiB'},async req=>{
   if(!req.auth)throw new HttpsError('unauthenticated','Authentication required.');
   const audioBase64=String(req.data?.audioBase64||'');
