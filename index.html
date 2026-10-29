@@ -11,20 +11,30 @@
   <div id="app"><div id="boot-status" style="padding:28px;color:#d7def7;font-family:system-ui,sans-serif">LOVE METER NEO を起動しています…</div></div>
   <script>
     (()=>{
-      const showBootError=(value)=>{
+      const esc=(v)=>String(v??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+      const showBootError=(value,meta={})=>{
         const app=document.getElementById('app');
         if(!app)return;
         const msg=String(value?.message||value?.reason?.message||value?.reason||value||'Unknown startup error');
-        app.innerHTML=`<div style="max-width:860px;margin:48px auto;padding:28px;border:1px solid #ef5f78;border-radius:18px;background:#151929;color:#f7f8ff;font-family:system-ui,sans-serif"><h2 style="margin-top:0;color:#ff7e95">起動エラー</h2><p>LOVE METER NEO の起動に失敗しました。</p><pre style="white-space:pre-wrap;word-break:break-word;background:#090c15;padding:16px;border-radius:12px;color:#ffd9df">${msg.replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]))}</pre><p style="line-height:1.7">Firebase Authentication の匿名認証が無効な場合は、Firebase Console → Security → Authentication → Sign-in method → Anonymous を有効にしてください。</p><button onclick="location.reload()" style="padding:10px 16px;border:0;border-radius:10px;font-weight:700">再読み込み</button></div>`;
+        const stack=String(value?.stack||value?.reason?.stack||'');
+        const details=[
+          meta.filename?`File: ${meta.filename}`:'',
+          meta.lineno?`Line: ${meta.lineno}${meta.colno?` / Column: ${meta.colno}`:''}`:'',
+          stack?`Stack:\n${stack}`:''
+        ].filter(Boolean).join('\n\n');
+        app.innerHTML=`<div style="max-width:900px;margin:48px auto;padding:28px;border:1px solid #ef5f78;border-radius:18px;background:#151929;color:#f7f8ff;font-family:system-ui,sans-serif"><h2 style="margin-top:0;color:#ff7e95">起動エラー</h2><p>LOVE METER NEO の起動に失敗しました。</p><pre style="white-space:pre-wrap;word-break:break-word;background:#090c15;padding:16px;border-radius:12px;color:#ffd9df">${esc(msg)}${details?`\n\n${esc(details)}`:''}</pre><p style="line-height:1.7">この表示の <b>File / Line / Column</b> が原因箇所です。Firebase認証エラーの場合はその内容もここに表示されます。</p><button onclick="location.reload()" style="padding:10px 16px;border:0;border-radius:10px;font-weight:700">再読み込み</button></div>`;
       };
-      window.addEventListener('error',e=>showBootError(e.error||e.message));
+      window.__lmShowBootError=showBootError;
+      window.addEventListener('error',e=>showBootError(e.error||e.message,{filename:e.filename,lineno:e.lineno,colno:e.colno}));
       window.addEventListener('unhandledrejection',e=>showBootError(e.reason));
       setTimeout(()=>{
         const app=document.getElementById('app');
-        if(app && app.querySelector('#boot-status')) showBootError('起動処理が15秒以内に完了しませんでした。Firebase接続または認証設定を確認してください。');
+        if(app && app.querySelector('#boot-status')) showBootError('起動処理が15秒以内に完了しませんでした。ネットワーク・Firebase接続・モジュール読み込みを確認してください。');
       },15000);
     })();
   </script>
-  <script type="module" src="./src/app.js?v=0.4.0b5h1"></script>
+  <script type="module">
+    import('./src/app.js?v=0.4.0b5h2').catch(err=>window.__lmShowBootError?.(err));
+  </script>
 </body>
 </html>
