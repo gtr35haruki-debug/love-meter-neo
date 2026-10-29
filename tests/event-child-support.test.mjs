@@ -6,7 +6,7 @@ import { childReadAloudPrompt } from '../src/question-bank.js';
 const app=fs.readFileSync(new URL('../src/app.js',import.meta.url),'utf8');
 const css=fs.readFileSync(new URL('../styles.css',import.meta.url),'utf8');
 
-assert.equal(APP_VERSION,'0.4.0-beta.1');
+assert.equal(APP_VERSION,'0.4.0-beta.4');
 assert.equal(CHILD_SUPPORT_VERSION,'CHILD_SUPPORT_V1');
 assert.match(app,/id="child-support"/);
 assert.match(app,/childSupport,childSupportVersion/);

@@ -13,6 +13,8 @@ const make=(id)=>({
         {sampleId:`A2${id}`,side:'A',bpm:75,sessionElapsedMs:1000,timestampMs:111112111,sequence:1}],
   rawB:[{sampleId:`B${id}`,side:'B',bpm:86,sessionElapsedMs:0,timestampMs:111111111,sequence:0}],
   surveys:{A:{pre:{data:{R1:83,O1:null,freeText:'real name named private',relationshipOther:'hidden'}}},B:{post:{data:{P1:25}}}},
+  aiTranscripts:[{questionIndex:0,side:'A',transcript:'Aの秘密の会話'},{questionIndex:0,side:'B',transcript:'Bの秘密の会話'}],
+  aiTalk:[{questionIndex:0,bonus:1,analysis:{summary:'会話特徴あり'}}],
   auditLogs:[{eventType:'PAUSED',timestamp:111111,actorUid:'firebase-uid-987',actorRole:'SENSOR_A',details:{deviceId:'secret',reason:'MANUAL'}}]
 });
 const one=make('LM-20260824-001'),two=make('LM-20260824-002');
@@ -27,7 +29,9 @@ assert.equal(json.sessions.length,2);
 assert.equal(json.sessions[0].heartRateRaw.A.length,2);
 assert.equal(json.sessions[0].questionnaires.A.pre.data.R1,83);
 assert.ok(json.sessions[0].heartRate1Hz.A.length>=2);
-assert.doesNotMatch(fileMap['all_sessions.json'],/secret-auth-id|"joinCode"|BLEsecret|firebase-uid-987|real name named private|participantName|joinCode/);
+assert.doesNotMatch(fileMap['all_sessions.json'],/secret-auth-id|"joinCode"|BLEsecret|firebase-uid-987|real name named private|participantName|joinCode|Aの秘密の会話|Bの秘密の会話/);
+const withText=buildExportFiles([one],{includeSurveys:true,includeFreeText:true});
+assert.match(Object.fromEntries(withText.files)['all_sessions.json'],/Aの秘密の会話/);
 assert.equal(redact({joinCode:'999999',score:0,participantAId:'P-99'}).score,0);
 const csv=Object.values(fileMap).find(x=>typeof x==='string'&&x.includes('raw_a_count'));
 assert.ok(csv);
