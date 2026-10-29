@@ -1,4 +1,4 @@
-# LOVE METER NEO v0.4.0-beta.1
+# LOVE METER NEO v0.4.0-beta.2
 
 2026-10-29 の改良案を一度実装したβ版です。
 
@@ -106,3 +106,31 @@ firebase deploy --only hosting
 - 音声を外部AIサービスへ送ることを参加者に事前説明する。
 - 研究モードの同意文は音声・AI分析を含む内容へ更新済み。
 - イベント表示にも音声AI利用の案内を追加済み。
+
+
+## v0.4.0-beta.2 音声記録の詳細
+
+- SENSOR A / SENSOR B の各PCで `getUserMedia()` によりモノラルマイクを取得します。
+- 接続時に約1秒（100ms x 10回）周囲音を測り、`max(0.018, 周囲RMS x 2.5)` を発話判定しきい値にします。
+- QUESTIONフェーズのみ録音・解析します。RESET/BASELINE/RECOVERYは録音しません。
+- Web Audio APIで100msごとにRMSとPitch(F0, 70–350Hz)を計算します。
+- DBには200msごとに間引いた特徴量を保存します。
+- 質問終了時に平均Pitch、Pitch SD、P10/P90、Pitch CV、RMS平均/SD/CV、発話率を集計します。
+- A/Bの時系列からSpeech BalanceとTurn Takingを計算します。
+- MediaRecorderでは質問単位のWebM/Opusを一時的にメモリ上に保持します。AI分析側(A)のみFirebase Functionへ送信し、文字起こしと会話分析に使います。
+- 生音声BlobはRealtime Database / Research Exportには保存しません。AI処理後に破棄します。
+- Records > 音声・AI で、保存済みの特徴量・200ms時系列・文字起こし・AI分析結果を確認できます。
+
+## v0.4.0-beta.4 voice baseline / microphone metadata
+- Each SENSOR PC selects microphone connection type: WIRED / WIRELESS / UNKNOWN.
+- Browser microphone label, sample rate, channel count, echo cancellation, noise suppression, AGC settings, ambient RMS and speech threshold are recorded in session metadata.
+- Before measurement, participant A and B each record a 10-second voice baseline. Measurement cannot start until both baselines are valid.
+- Baseline stores pitch mean/SD, RMS, speech ratio and 200 ms feature frames. Raw baseline audio is not stored.
+- Question Pitch Response is calculated within participant, not by comparing A/B absolute Hz. Records keep delta Hz, delta %, cents, normalized z-like delta and UP/DOWN/SAME.
+- Question RMS change is stored in dB relative to that participant's baseline.
+- Changing/reconnecting a microphone invalidates that side's baseline and requires a new 10-second baseline.
+
+## v0.4.0-beta.4 integrated DAIFESTA voice/AI build
+See `CHANGELOG_v0.4.0-beta.4.md` and `IMPLEMENTATION_NOTES_v0.4.0-beta.4.md`.
+
+This build integrates personal 10-second voice baselines, selectable wired/wireless mouth microphones, dual-channel five-state speaker classification, relative pitch reaction, latency metadata/correction when reported, separate A/B AI transcription, capped AI TALK BONUS, karaoke-style AI result comments, and detailed Voice/AI Records.

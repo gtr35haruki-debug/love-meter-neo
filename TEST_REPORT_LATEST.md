@@ -1,33 +1,32 @@
-# TEST REPORT v0.4.0-beta.1
+# TEST REPORT — LOVE METER NEO v0.4.0-beta.4
 
 Date: 2026-10-29
-APP_VERSION: 0.4.0-beta.1
-
-## Static syntax checks
-- src/*.js: PASS
-- functions/index.js: PASS
 
 ## Automated tests
-- event-child-support.test.mjs: PASS
-- event-v2.test.mjs: PASS
-- metrics.test.mjs: PASS
-  - 1 Hz jitter regression: PASS
-  - skipped-question exclusion: PASS
-  - EVENT_V2 Q2/Q3 local-baseline regression: PASS
-  - DISPLAY_SCORE_V3_PILOT regression: PASS
-- research-export.test.mjs: PASS
-- survey-schema.test.mjs: PASS
-- voice.test.mjs: PASS
-  - voice summary: PASS
-  - speech balance: PASS
-  - turn-taking: PASS
-  - session voice score: PASS
+All bundled automated tests passed.
 
-## Not automatically tested in this container
-- Real HW9 Bluetooth connection
-- Real browser microphone permission/recording on the target PCs
-- Firebase deployment
-- OpenAI API call with the user's API key
-- Same-room microphone cross-talk under the actual event environment
+- EVENT child-support / questionnaire behavior: PASS
+- EVENT_V2 questions / timing: PASS
+- Heart metrics: PASS
+- 1 Hz jitter regression: PASS
+- skipped-question exclusion: PASS
+- EVENT_V2 local-baseline / Question Response regression: PASS
+- DISPLAY_SCORE_V3_PILOT regression: PASS
+- Research export ZIP / privacy / UTF-8 / CRC: PASS
+- Survey schema: PASS
+- Voice baseline-relative metrics: PASS
+- Dual-microphone A/B/BOTH/UNKNOWN/SILENCE classification: PASS
+- AI transcript export privacy: PASS
 
-These require an on-device smoke test before DAIFESTA use.
+## Not yet validated by automated test
+The following still require physical/browser testing with the real setup:
+- COOSPO HW9 x2 + SENSOR A/B + DISPLAY on three PCs
+- actual wired microphone headset/earbud on one participant
+- actual wireless microphone earbud/headset on the other participant
+- browser microphone selection on the intended devices
+- Bluetooth microphone latency behavior on the exact PCs/earbuds
+- Firebase Functions deployment and real OpenAI API calls
+- real noisy-event environment cross-talk and UNKNOWN rate
+
+## Research caution
+Passing software tests does not validate the scientific relationship between VOICE SCORE / AI TALK BONUS / NEO SCORE and relationship closeness. These remain beta experience/research hypotheses requiring new participant data.

@@ -3,11 +3,30 @@
     ".read": false,
     ".write": false,
     "indexes": {
-      "join_code": { "$code": { ".read": "auth != null", ".write": "auth != null" } },
-      "display_counter": { "$date": { ".read": "auth != null", ".write": "auth != null" } },
-      "participant_counter": { ".read": "auth != null", ".write": "auth != null" },
-      "assignment_counts": { ".read": "auth != null", ".write": "auth != null" },
-      "pair_last_order": { ".read": "auth != null", ".write": "auth != null" }
+      "join_code": {
+        "$code": {
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      },
+      "display_counter": {
+        "$date": {
+          ".read": "auth != null",
+          ".write": "auth != null"
+        }
+      },
+      "participant_counter": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      },
+      "assignment_counts": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      },
+      "pair_last_order": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
     },
     "session_members": {
       "$session": {
@@ -67,7 +86,51 @@
         }
       }
     },
-    "question_banks": { ".read": "auth != null" },
-    "protocols": { ".read": "auth != null" }
+    "question_banks": {
+      ".read": "auth != null"
+    },
+    "protocols": {
+      ".read": "auth != null"
+    },
+    "voice_features": {
+      ".read": "auth != null && auth.token.recordsUntil != null && auth.token.recordsUntil > now",
+      "$session": {
+        "$side": {
+          ".read": "auth != null && (root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_A' || root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_B' || (auth.token.recordsUntil != null && auth.token.recordsUntil > now))",
+          "$question": {
+            ".write": "auth != null && (($side === 'A' && root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_A') || ($side === 'B' && root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_B'))"
+          }
+        }
+      }
+    },
+    "voice_baseline": {
+      ".read": "auth != null && auth.token.recordsUntil != null && auth.token.recordsUntil > now",
+      "$session": {
+        "$side": {
+          ".read": "auth != null && (root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_A' || root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_B' || (auth.token.recordsUntil != null && auth.token.recordsUntil > now))",
+          ".write": "auth != null && (($side === 'A' && root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_A') || ($side === 'B' && root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_B'))"
+        }
+      }
+    },
+    "ai_talk_transcripts": {
+      ".read": "auth != null && auth.token.recordsUntil != null && auth.token.recordsUntil > now",
+      "$session": {
+        ".read": "auth != null && (root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_A' || root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_B' || (auth.token.recordsUntil != null && auth.token.recordsUntil > now))",
+        "$question": {
+          "$side": {
+            ".write": "auth != null && (($side === 'A' && root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_A') || ($side === 'B' && root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_B'))"
+          }
+        }
+      }
+    },
+    "ai_talk_analysis": {
+      ".read": "auth != null && auth.token.recordsUntil != null && auth.token.recordsUntil > now",
+      "$session": {
+        ".read": "auth != null && (root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_A' || root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_B' || (auth.token.recordsUntil != null && auth.token.recordsUntil > now))",
+        "$question": {
+          ".write": "auth != null && (root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_A' || root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_B')"
+        }
+      }
+    }
   }
 }

@@ -1,4 +1,4 @@
-# LOVE METER NEO v0.4.0-beta.1
+# LOVE METER NEO v0.4.0-beta.2
 
 ## 2026-10-29
 

@@ -1,4 +1,4 @@
-# LOVE METER NEO v0.4.0-beta.1 更新手順
+# LOVE METER NEO v0.4.0-beta.2 更新手順
 
 ## 1. ファイルを更新
 このZIPの内容を既存プロジェクトへ反映する。特に次を必ず更新する。
@@ -29,7 +29,7 @@ firebase deploy --only hosting
 ```
 
 ## 5. 3台すべて再読み込み
-各PCで Ctrl+Shift+R。画面上部 `APP 0.4.0-beta.1` を確認。
+各PCで Ctrl+Shift+R。画面上部 `APP 0.4.0-beta.2` を確認。
 
 ## 6. 動作確認
 - A/B両方のHW9 READY

@@ -1,7 +1,7 @@
-# TEST REPORT v0.4.0-beta.1
+# TEST REPORT v0.4.0-beta.2
 
 Date: 2026-10-29
-APP_VERSION: 0.4.0-beta.1
+APP_VERSION: 0.4.0-beta.2
 
 ## Static syntax checks
 - src/*.js: PASS

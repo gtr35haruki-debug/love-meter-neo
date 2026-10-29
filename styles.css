@@ -204,3 +204,8 @@ input:focus,select:focus,textarea:focus{border-color:#6c75b7;box-shadow:0 0 0 3p
 
 @media(max-width:1180px){.karaoke-hero{grid-template-columns:1fr 1fr}.ai-comment-card{grid-column:1/-1}.karaoke-detail-grid{grid-template-columns:1fr 1fr}.karaoke-detail-grid .karaoke-panel:last-child{grid-column:1/-1}.score-orbit{min-height:270px}}
 @media(max-width:720px){.karaoke-head{align-items:flex-start;flex-direction:column}.karaoke-hero,.karaoke-detail-grid{grid-template-columns:1fr;padding-left:10px;padding-right:10px}.ai-comment-card,.karaoke-detail-grid .karaoke-panel:last-child{grid-column:auto}.score-orbit{min-height:280px}.karaoke-breakdown{width:100%}.karaoke-metrics{grid-template-columns:1fr 1fr}.karaoke-disclaimer{margin-left:10px;margin-right:10px}}
+
+/* v0.4.0-beta.4 dual-mic voice / AI records */
+.dual-transcript{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.dual-transcript .callout{min-height:90px}
+@media(max-width:760px){.dual-transcript{grid-template-columns:1fr}}
