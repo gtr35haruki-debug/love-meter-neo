@@ -1,9 +1,33 @@
-# TEST REPORT v0.3.3
+# TEST REPORT v0.4.0-beta.1
 
-- APP_VERSION: 0.3.3
-- index.html entry module cache bust: PASS
-- src local module imports cache bust: PASS
-- EVENT 6 categories / 54 questions: inherited from v0.3.2
-- CHILD_SUPPORT_V1: retained
-- Event/child questionnaires: removed
-- Event question skip: retained
+Date: 2026-10-29
+APP_VERSION: 0.4.0-beta.1
+
+## Static syntax checks
+- src/*.js: PASS
+- functions/index.js: PASS
+
+## Automated tests
+- event-child-support.test.mjs: PASS
+- event-v2.test.mjs: PASS
+- metrics.test.mjs: PASS
+  - 1 Hz jitter regression: PASS
+  - skipped-question exclusion: PASS
+  - EVENT_V2 Q2/Q3 local-baseline regression: PASS
+  - DISPLAY_SCORE_V3_PILOT regression: PASS
+- research-export.test.mjs: PASS
+- survey-schema.test.mjs: PASS
+- voice.test.mjs: PASS
+  - voice summary: PASS
+  - speech balance: PASS
+  - turn-taking: PASS
+  - session voice score: PASS
+
+## Not automatically tested in this container
+- Real HW9 Bluetooth connection
+- Real browser microphone permission/recording on the target PCs
+- Firebase deployment
+- OpenAI API call with the user's API key
+- Same-room microphone cross-talk under the actual event environment
+
+These require an on-device smoke test before DAIFESTA use.
