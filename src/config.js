@@ -1,12 +1,14 @@
-export const APP_VERSION = '0.3.4';
+export const APP_VERSION = '0.4.0-beta.1';
 export const QUESTION_BANK_VERSION = 'QUESTION_BANK_V1';
 export const EVENT_QUESTION_BANK_VERSION = 'QUESTION_BANK_EVENT_V3';
 export const CHILD_SUPPORT_VERSION = 'CHILD_SUPPORT_V1';
 export const EVENT_GUIDE_VERSION = 'EVENT_GUIDE_V2';
-export const CONSENT_VERSION = 'CONSENT_V1';
+export const CONSENT_VERSION = 'CONSENT_V2_AUDIO_AI';
 export const PREPROCESSING_VERSION = 'PREPROCESSING_V1_1_PILOT';
 export const METRICS_VERSION = 'METRICS_V1_1_PILOT';
-export const DISPLAY_SCORE_VERSION = 'DISPLAY_SCORE_V2_PILOT';
+export const DISPLAY_SCORE_VERSION = 'DISPLAY_SCORE_V3_PILOT';
+export const VOICE_METRICS_VERSION = 'VOICE_METRICS_V0_1_BETA';
+export const AI_TALK_VERSION = 'AI_TALK_BONUS_V0_1_BETA';
 export const DISPLAY_SCALE_VERSION = 'DISPLAY_SCALE_PILOT_20260824_V1';
 
 export const CONFIG = {
@@ -51,12 +53,44 @@ export const CONFIG = {
       magnitude: { p10: -1.1461039886, p50: 0.0970797721, p90: 1.0475 },
       questionResponse: { p10: 0.6440789474, p50: 2.4916666667, p90: 5.0208333333 },
     },
-    weights: {
+    legacyWeights: {
       direction: 0.30,
       temporal: 0.20,
       magnitude: 0.20,
       questionResponse: 0.30,
     },
+    v3Weights: {
+      direction: 0.15,
+      temporal: 0.10,
+      magnitude: 0.10,
+      questionResponse: 0.25,
+      balance: 0.40,
+    },
+  },
+
+  voice: {
+    frameMs: 100,
+    savedFrameMs: 200,
+    fftSize: 2048,
+    pitchMinHz: 70,
+    pitchMaxHz: 350,
+    speechRmsThreshold: 0.018,
+    ambientMultiplier: 2.5,
+    pitchCvHigh: 0.14,
+    pitchRangeRatioHigh: 0.30,
+    rmsCvHigh: 0.75,
+    turnsForFullScore: 8,
+    overlapPenaltyAt: 0.45,
+  },
+  experienceScore: {
+    heartWeight: 0.70,
+    voiceWeight: 0.30,
+    aiTalkBonusMax: 5,
+  },
+  ai: {
+    enabled: true,
+    analysisSide: 'A',
+    maxAudioBytes: 4 * 1024 * 1024,
   },
   firebase: {
     apiKey: 'AIzaSyByFvnkQIbnz2XbZMQOABmGUFa7MyvsiMg',

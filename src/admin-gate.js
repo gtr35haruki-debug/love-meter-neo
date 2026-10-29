@@ -1,4 +1,4 @@
-import { CONFIG } from './config.js?v=0.3.4';
+import { CONFIG } from './config.js?v=0.4.0b1';
 
 const KEY='lmneo-records-until';
 const LAST_ACTIVITY_KEY='lmneo-records-last-activity';

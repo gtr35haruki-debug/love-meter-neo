@@ -1,5 +1,5 @@
-import { CONFIG, APP_VERSION } from './config.js?v=0.3.4';
-import { putHr, getHr as getLocalHr, putSurvey, getSurvey as getLocalSurvey, putOutbox, deleteOutbox, listOutbox } from './idb.js?v=0.3.4';
+import { CONFIG, APP_VERSION } from './config.js?v=0.4.0b1';
+import { putHr, getHr as getLocalHr, putSurvey, getSurvey as getLocalSurvey, putOutbox, deleteOutbox, listOutbox } from './idb.js?v=0.4.0b1';
 
 const SDK='12.17.1';
 const [{initializeApp,getApps},{getDatabase,ref,set,update,get,onValue,runTransaction,onDisconnect,push},{getAuth,signInAnonymously,onAuthStateChanged}] = await Promise.all([
@@ -104,6 +104,7 @@ export async function updateSession(sessionId,patch){
   return refreshPublic(sessionId);
 }
 export async function setSensorReady(sessionId,side,ready){await set(ref(db,`session_meta/${sessionId}/sensorReady/${side}`),!!ready);await refreshPublic(sessionId);}
+export async function setMicReady(sessionId,side,ready){await set(ref(db,`session_meta/${sessionId}/micReady/${side}`),!!ready);await refreshPublic(sessionId);}
 export async function setSurveyStatus(sessionId,key,value=true){await set(ref(db,`session_meta/${sessionId}/surveyStatus/${key}`),!!value);await refreshPublic(sessionId);}
 
 export async function loadSession(sessionId){watch(sessionId);const path=currentRole()==='DISPLAY'?`public_display/${sessionId}`:`session_meta/${sessionId}`;const s=await get(ref(db,path));return s.exists()?s.val():null;}
@@ -130,17 +131,32 @@ export async function saveSurvey(sessionId,side,stage,data){
   await putSurvey(sessionId,side,stage,data);const payload={data,submittedAt:now()};await queueWrite(`survey:${sessionId}:${side}:${stage}`,`questionnaires/${sessionId}/${side}/${stage}`,payload);if(connected)await flushOutbox();
 }
 export async function loadSurvey(sessionId,side,stage){try{const s=await get(ref(db,`questionnaires/${sessionId}/${side}/${stage}`));if(s.exists())return s.val();}catch{}return getLocalSurvey(sessionId,side,stage);}
+export async function saveVoiceFeature(sessionId,side,questionIndex,data){
+  await set(ref(db,`voice_features/${sessionId}/${side}/${questionIndex}`),{...data,side,questionIndex,savedAt:now()});
+}
+export async function loadVoiceFeatures(sessionId,side){
+  try{const s=await get(ref(db,`voice_features/${sessionId}/${side}`));return Object.values(s.val()||{}).sort((a,b)=>Number(a.questionIndex)-Number(b.questionIndex));}catch{return [];}
+}
+export async function saveAiAnalysis(sessionId,questionIndex,data){
+  await set(ref(db,`ai_talk_analysis/${sessionId}/${questionIndex}`),{...data,questionIndex,savedAt:now()});
+}
+export async function loadAiAnalyses(sessionId){
+  try{const s=await get(ref(db,`ai_talk_analysis/${sessionId}`));return Object.values(s.val()||{}).sort((a,b)=>Number(a.questionIndex)-Number(b.questionIndex));}catch{return [];}
+}
 export async function allSessions(){const s=await get(ref(db,'session_meta'));return Object.values(s.val()||{});}
 
 /** Unlike the Records preview readers, export must fail loudly on a denied/offline cloud read. */
 export async function loadExportBundle(sessionId,{includeSurveys=true}={}){
   if(!connected)throw new Error('Firebaseがオフラインです。');
-  const [meta,rawA,rawB,questionnaires,events]=await Promise.all([
+  const [meta,rawA,rawB,questionnaires,events,voiceA,voiceB,aiTalk]=await Promise.all([
     get(ref(db,`session_meta/${sessionId}`)),
     get(ref(db,`heart_rate_raw/${sessionId}/A`)),
     get(ref(db,`heart_rate_raw/${sessionId}/B`)),
     includeSurveys?get(ref(db,`questionnaires/${sessionId}`)):Promise.resolve(null),
     get(ref(db,`audit_logs/${sessionId}`)),
+    get(ref(db,`voice_features/${sessionId}/A`)),
+    get(ref(db,`voice_features/${sessionId}/B`)),
+    get(ref(db,`ai_talk_analysis/${sessionId}`)),
   ]);
   if(!meta.exists())throw new Error(`セッション ${sessionId} がありません。`);
   const merge=async(snap,side)=>{
@@ -154,7 +170,7 @@ export async function loadExportBundle(sessionId,{includeSurveys=true}={}){
     const local=await getLocalSurvey(sessionId,side,stage);
     if(local){surv[side]||={};surv[side][stage]=local;}
   }
-  return {session:meta.val(),rawA:a,rawB:b,surveys:surv,auditLogs:Object.values(events.val()||{}).sort((x,y)=>(x.timestamp||0)-(y.timestamp||0))};
+  return {session:meta.val(),rawA:a,rawB:b,surveys:surv,auditLogs:Object.values(events.val()||{}).sort((x,y)=>(x.timestamp||0)-(y.timestamp||0)),voiceA:Object.values(voiceA.val()||{}),voiceB:Object.values(voiceB.val()||{}),aiTalk:Object.values(aiTalk.val()||{})};
 }
 
 

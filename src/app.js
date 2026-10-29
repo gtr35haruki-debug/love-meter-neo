@@ -1,20 +1,22 @@
 import {
   APP_VERSION, CONFIG, ROLE, SESSION_STATUS, QUESTION_BANK_VERSION, EVENT_QUESTION_BANK_VERSION,
   CHILD_SUPPORT_VERSION, EVENT_GUIDE_VERSION, CONSENT_VERSION,
-  PREPROCESSING_VERSION, METRICS_VERSION, DISPLAY_SCORE_VERSION, DISPLAY_SCALE_VERSION
-} from './config.js?v=0.3.4';
-import { getQuestionBankForProtocol, getQuestionCategoriesForProtocol, childReadAloudPrompt } from './question-bank.js?v=0.3.4';
-import { PROTOCOLS, SET_ORDERS, buildTimeline, getPhaseAtElapsed, isEventProtocol } from './protocols.js?v=0.3.4';
+  PREPROCESSING_VERSION, METRICS_VERSION, DISPLAY_SCORE_VERSION, DISPLAY_SCALE_VERSION, VOICE_METRICS_VERSION, AI_TALK_VERSION
+} from './config.js?v=0.4.0b1';
+import { getQuestionBankForProtocol, getQuestionCategoriesForProtocol, childReadAloudPrompt } from './question-bank.js?v=0.4.0b1';
+import { PROTOCOLS, SET_ORDERS, buildTimeline, getPhaseAtElapsed, isEventProtocol } from './protocols.js?v=0.4.0b1';
 import {
   RELATIONSHIP_OPTIONS, PRE_RELATIONSHIP_ITEMS, PRE_STATE_ITEMS, OPTIONAL_ITEM,
   CONDITION_OPTIONS, POST_ITEMS, CONSENT_TEXT
-} from './survey-schema.js?v=0.3.4';
-import * as backend from './backend.js?v=0.3.4';
-import { HeartRateSensor, DemoHeartRateSensor } from './bluetooth-hw9.js?v=0.3.4';
-import { computeSessionMetrics } from './metrics.js?v=0.3.4';
-import { buildExportFiles, zipFile, redact } from './research-export.js?v=0.3.4';
-import { radarSvg } from './radar.js?v=0.3.4';
-import { isRecordsUnlocked, verifyRecordsPin, lockRecords, touchRecordsActivity } from './admin-gate.js?v=0.3.4';
+} from './survey-schema.js?v=0.4.0b1';
+import * as backend from './backend.js?v=0.4.0b1';
+import { HeartRateSensor, DemoHeartRateSensor } from './bluetooth-hw9.js?v=0.4.0b1';
+import { computeSessionMetrics } from './metrics.js?v=0.4.0b1';
+import { VoiceCapture, computeVoiceSessionMetrics } from './voice.js?v=0.4.0b1';
+import { analyzeConversationAudio, generateResultComment } from './ai.js?v=0.4.0b1';
+import { buildExportFiles, zipFile, redact } from './research-export.js?v=0.4.0b1';
+import { radarSvg } from './radar.js?v=0.4.0b1';
+import { isRecordsUnlocked, verifyRecordsPin, lockRecords, touchRecordsActivity } from './admin-gate.js?v=0.4.0b1';
 
 const app=document.querySelector('#app');
 const state={
@@ -26,6 +28,11 @@ const state={
   sensorName:null,
   sensorStreamTimes:[],
   sensorValidated:false,
+  voiceCapture:null,
+  voiceStatus:'DISCONNECTED',
+  voiceThreshold:null,
+  voiceProcessing:0,
+  voiceTransitionBusy:false,
   bpm:null,
   lastSamples:[],
   surveyStage:null,
@@ -121,9 +128,10 @@ async function chooseRole(role){
 }
 async function clearRole(){
   try{if(state.sensor)await state.sensor.disconnect();}catch{}
-  if(state.sessionId&&roleSide())try{await backend.setSensorReady(state.sessionId,roleSide(),false);}catch{}
+  if(state.sessionId&&roleSide())try{await backend.setSensorReady(state.sessionId,roleSide(),false);await backend.setMicReady(state.sessionId,roleSide(),false);}catch{}
   stopTick();sessionStorage.removeItem('lmneo-role');sessionStorage.removeItem('lmneo-session');
-  state.role=null;state.sessionId=null;state.session=null;state.sensor=null;state.sensorStatus='DISCONNECTED';state.sensorValidated=false;state.surveyStage=null;state.surveyLocked=null;render();
+  try{if(state.voiceCapture)await state.voiceCapture.disconnect();}catch{}
+  state.role=null;state.sessionId=null;state.session=null;state.sensor=null;state.sensorStatus='DISCONNECTED';state.sensorValidated=false;state.voiceCapture=null;state.voiceStatus='DISCONNECTED';state.voiceThreshold=null;state.surveyStage=null;state.surveyLocked=null;render();
 }
 
 function roleSelection(){
@@ -223,11 +231,11 @@ async function createSession(){
       timeline,createdAt:now(),appVersion:APP_VERSION,
       questionBankVersion:protocolId==='EVENT_V2'?EVENT_QUESTION_BANK_VERSION:QUESTION_BANK_VERSION,
       consentVersion:CONSENT_VERSION,preprocessingVersion:PREPROCESSING_VERSION,
-      metricsVersion:METRICS_VERSION,displayScoreVersion:DISPLAY_SCORE_VERSION,displayScaleVersion:DISPLAY_SCALE_VERSION,introPage:0,
+      metricsVersion:METRICS_VERSION,displayScoreVersion:DISPLAY_SCORE_VERSION,displayScaleVersion:DISPLAY_SCALE_VERSION,voiceMetricsVersion:VOICE_METRICS_VERSION,aiTalkVersion:AI_TALK_VERSION,introPage:0,
       childSupport,childSupportVersion:childSupport?CHILD_SUPPORT_VERSION:null,
       eventGuideVersion:protocolId==='EVENT_V2'?EVENT_GUIDE_VERSION:null,
       skippedQuestions:{},
-      sensorReady:{A:false,B:false},surveyStatus,devicePresence:{[state.role]:now()},guardianOrSchoolConsent:'externally_managed'
+      sensorReady:{A:false,B:false},micReady:{A:false,B:false},surveyStatus,devicePresence:{[state.role]:now()},guardianOrSchoolConsent:'externally_managed'
     };
     await backend.createSession(s);state.session=await backend.loadSession(s.sessionId);state.sessionId=s.sessionId;sessionStorage.setItem('lmneo-session',s.sessionId);
     await backend.appendAuditLog(s.sessionId,{eventType:'SESSION_CREATED',details:{displayId,protocolId,category,setOrder,childSupport}});render();
@@ -238,7 +246,7 @@ async function joinSession(){
   try{
     const s=await backend.joinByCode(code);if(!s){alert('セッションが見つかりません。6桁コードを確認してください。');return;}
     state.session=s;state.sessionId=s.sessionId;sessionStorage.setItem('lmneo-session',s.sessionId);
-    if(roleSide())await backend.setSensorReady(s.sessionId,roleSide(),false);
+    if(roleSide()){await backend.setSensorReady(s.sessionId,roleSide(),false);await backend.setMicReady(s.sessionId,roleSide(),false);}
     await backend.appendAuditLog(s.sessionId,{eventType:'DEVICE_JOINED',details:{role:state.role}});render();
   }catch(e){alert(e?.message||'セッションへ参加できませんでした。');console.error(e);}
 }
@@ -256,6 +264,9 @@ function getStartBlockers(s){
   const blockers=[];const side=roleSide();
   if(!isController())blockers.push(`この端末は操作端末ではありません（現在: ${s.controllerDevice||'未設定'}）`);
   if(state.sensorStatus!=='CONNECTED'||!state.sensorValidated)blockers.push(`SENSOR ${side} で心拍ストリームの確認が必要です`);
+  if(state.voiceStatus!=='READY')blockers.push(`SENSOR ${side} でマイク準備が必要です`);
+  if(!s.micReady?.A)blockers.push('Microphone A が READY ではありません');
+  if(!s.micReady?.B)blockers.push('Microphone B が READY ではありません');
   if(!s.sensorReady?.A)blockers.push('Sensor A が READY ではありません');
   if(!s.sensorReady?.B)blockers.push('Sensor B が READY ではありません');
   if(s.protocolId==='RESEARCH_V1'){
@@ -294,7 +305,7 @@ function operatorScreen(){
   const researchReadiness=s.protocolId==='RESEARCH_V1'?`${readinessRow('A 事前アンケート',!!s.surveyStatus?.preA,'個別・非公開')}${readinessRow('B 事前アンケート',!!s.surveyStatus?.preB,'個別・非公開')}`:'';
   return shell(`<div class="operator-head">
     <div><div class="section-title">${esc(state.role)} · ${controllerLabel}</div><h1 class="session-id">${esc(s.displayId)}</h1><div class="join-line">JOIN CODE <b class="join-code compact-code">${esc(s.joinCode)}</b></div></div>
-    <div class="actions">${s.childSupport?'<span class="status child-mode"><span class="dot"></span>こどもサポート</span>':''}${statusPill(connected?`${state.sensorName||'SENSOR'} CONNECTED`:state.sensorStatus,connected?'good':'bad')}${statusPill(s.stage,s.stage==='ABORTED'?'bad':s.stage==='RUNNING'?'good':'neutral')}</div>
+    <div class="actions">${s.childSupport?'<span class="status child-mode"><span class="dot"></span>こどもサポート</span>':''}${statusPill(connected?`${state.sensorName||'SENSOR'} CONNECTED`:state.sensorStatus,connected?'good':'bad')}${statusPill(state.voiceStatus==='READY'?'MIC READY':state.voiceStatus,state.voiceStatus==='READY'?'good':state.voiceStatus==='RECORDING'?'good':'neutral')}${statusPill(s.stage,s.stage==='ABORTED'?'bad':s.stage==='RUNNING'?'good':'neutral')}</div>
   </div>
   <div class="layout operator-layout">
     <main>
@@ -312,7 +323,8 @@ function operatorScreen(){
       ${researchReadiness}
       ${readinessRow('Sensor A',!!s.sensorReady?.A,'実心拍を数秒受信してREADY')}
       ${readinessRow('Sensor B',!!s.sensorReady?.B,'実心拍を数秒受信してREADY')}
-      <div class="control-group"><div class="section-title">SENSOR ${side}</div><div class="grid2"><button class="btn" data-action="connect-hw9">HW9接続</button><button class="btn btn-quiet" data-action="connect-demo">DEMO HR</button></div>${preButton}</div>
+      ${readinessRow('Microphone A',!!s.micReady?.A,'音声解析READY')}${readinessRow('Microphone B',!!s.micReady?.B,'音声解析READY')}
+      <div class="control-group"><div class="section-title">SENSOR ${side}</div><div class="grid2"><button class="btn" data-action="connect-hw9">HW9接続</button><button class="btn btn-quiet" data-action="connect-demo">DEMO HR</button></div><button class="btn full mic-btn ${state.voiceStatus==='READY'?'good':''}" data-action="connect-mic" ${state.voiceStatus==='READY'?'disabled':''}>${state.voiceStatus==='READY'?'マイク準備完了':'PCマイクを準備'}</button><div class="mini">音声は質問中のみ解析します。生音声ファイルはLOVE METER側には保存しません。</div>${preButton}</div>
       ${s.stage==='SETUP'&&isController()?`<div class="control-group"><div class="section-title">PC1 参加説明</div><div class="intro-control"><button class="btn btn-quiet" data-action="intro-prev" ${Number(s.introPage||0)===0?'disabled':''}>←</button><span>${Number(s.introPage||0)+1} / 3</span><button class="btn btn-quiet" data-action="intro-next" ${Number(s.introPage||0)>=2?'disabled':''}>→</button></div></div>`:''}
       ${s.stage==='SETUP'?`<div class="control-group"><button class="btn primary full" data-action="start-acclim" ${canProceed?'':'disabled'}>${s.protocolId==='RESEARCH_V1'?'5分の順応を開始':'計測準備完了'}</button>${!canProceed?`<div class="blocker"><b>開始できない理由</b>${blockers.map(x=>`<span>• ${esc(x)}</span>`).join('')}</div>`:''}</div>`:''}
       ${s.stage==='ACCLIMATION'?`<div class="control-group"><div class="callout info">順応中 <b id="live-acclim">${fmt((s.readyAtMs||0)-now())}</b><br><small>装着直後・初期緊張の影響を減らすための時間です。</small></div></div>`:''}
@@ -325,7 +337,7 @@ function operatorScreen(){
     </aside>
   </div>`);
 }
-function operatorResultSummary(s){const m=s.metrics||{};return `<section class="panel research-summary"><div class="section-title">研究用の生指標 (RESEARCH VALUES) · 実験者のみ</div><div class="grid5"><div class="kpi"><small>方向一致 (Direction)</small><strong>${num(m.direction,1)}</strong></div><div class="kpi"><small>反応の大きさ (Magnitude)</small><strong>${num(m.magnitude,2)}</strong></div><div class="kpi"><small>時間同期 (Temporal r)</small><strong>${num(m.temporal,2)}</strong></div><div class="kpi"><small>反応バランス (Balance)</small><strong>${num(m.balance,1)}</strong></div><div class="kpi"><small>質問反応量 (Q Response)</small><strong>${num(m.questionResponse,2)}</strong></div></div><p class="mini">NEO SCOREとは分離して保存します。科学的な総合関係値としては扱いません。</p></section>`;}
+function operatorResultSummary(s){const m=s.metrics||{},v=s.voiceMetrics||{},d=s.displayResult||{};return `<section class="panel research-summary"><div class="section-title">研究用の生指標 (RESEARCH VALUES) · 実験者のみ</div><div class="grid5"><div class="kpi"><small>方向一致 (Direction)</small><strong>${num(m.direction,1)}</strong></div><div class="kpi"><small>反応の大きさ (Magnitude)</small><strong>${num(m.magnitude,2)}</strong></div><div class="kpi"><small>時間同期 (Temporal r)</small><strong>${num(m.temporal,2)}</strong></div><div class="kpi"><small>反応バランス (Balance)</small><strong>${num(m.balance,1)}</strong></div><div class="kpi"><small>質問反応量 (Q Response)</small><strong>${num(m.questionResponse,2)}</strong></div></div><div class="grid4 score-breakdown-record"><div class="kpi"><small>Heart V3 β</small><strong>${num(d.heartScore,1)}</strong></div><div class="kpi"><small>Legacy V2</small><strong>${num(m.legacyNeoScore,1)}</strong></div><div class="kpi"><small>Voice β</small><strong>${num(v.voiceScore,1)}</strong></div><div class="kpi"><small>AI Talk Bonus</small><strong>${Number.isFinite(d.aiTalkBonus)?'+'+Number(d.aiTalkBonus).toFixed(0):'—'}</strong></div></div><p class="mini">V3・VOICE・AI BONUSはいずれもβ版です。旧V2も比較用に保存し、科学的な総合関係値としては扱いません。</p></section>`;}
 const num=(v,d=1)=>Number.isFinite(Number(v))?Number(v).toFixed(d):'算出不可 (NA)';
 
 async function startAcclim(){
@@ -365,8 +377,11 @@ function startTick(){
     if(state.session.stage==='RUNNING'){
       if(isController()&&(!state.session.sensorReady?.A||!state.session.sensorReady?.B)){await pauseMeasure('SENSOR_LOSS');return;}
       const rt=runtimeInfo(state.session);const total=state.session.timeline?.at(-1)?.endOffsetMs||0;
+      await syncVoiceCapture(rt.phase);
       if(rt.elapsed>=total){await finishMeasurement();return;}
       const key=phaseKey(state.session);if(key!==state.lastPhaseKey){state.lastPhaseKey=key;render();return;}
+    }else if(state.voiceCapture?.activeMeta){
+      await syncVoiceCapture(null);
     }
     updateLiveUi();
   },250);
@@ -393,6 +408,54 @@ async function connectSensor(demo=false){
   try{await state.sensor.connect();await backend.appendAuditLog(state.sessionId,{eventType:demo?'DEMO_SENSOR_CONNECTED':'HW9_CONNECTED',details:{side}});}
   catch(e){state.sensorStatus='ERROR';alert(`センサー接続に失敗しました。\n${e.message}`);render();}
 }
+async function connectMicrophone(){
+  const side=roleSide();if(!side)return;
+  try{if(state.voiceCapture)await state.voiceCapture.disconnect();}catch{}
+  state.voiceStatus='REQUESTING';render();
+  state.voiceCapture=new VoiceCapture({onStatus:st=>{
+    state.voiceStatus=st.state; if(Number.isFinite(st.speechThreshold))state.voiceThreshold=st.speechThreshold;
+    const el=document.querySelector('[data-action="connect-mic"]');if(el&&st.state==='READY'){el.textContent='マイク準備完了';el.disabled=true;el.classList.add('good');}
+  }});
+  try{
+    const cal=await state.voiceCapture.connect();state.voiceStatus='READY';state.voiceThreshold=cal.speechThreshold;await backend.setMicReady(state.sessionId,side,true);
+    await backend.appendAuditLog(state.sessionId,{eventType:'MIC_READY',details:{side,ambientRms:cal.ambientRms,speechThreshold:cal.speechThreshold}});render();
+  }catch(e){state.voiceStatus='ERROR';alert(`マイクの準備に失敗しました。\n${e?.message||e}`);render();}
+}
+
+async function processAiQuestion(captured,feature){
+  if(roleSide()!==CONFIG.ai.analysisSide||!captured?.blob?.size||feature.skipped)return;
+  state.voiceProcessing++;
+  try{
+    const ai=await analyzeConversationAudio({blob:captured.blob,sessionId:state.sessionId,questionIndex:feature.questionIndex,questionText:feature.questionText});
+    if(ai)await backend.saveAiAnalysis(state.sessionId,feature.questionIndex,{...ai,questionText:feature.questionText});
+  }catch(e){console.warn('AI talk analysis failed',e);await backend.appendAuditLog(state.sessionId,{eventType:'AI_TALK_FAILED',details:{questionIndex:feature.questionIndex,message:String(e?.message||e).slice(0,160)}}).catch(()=>{});}
+  finally{state.voiceProcessing=Math.max(0,state.voiceProcessing-1);}
+}
+
+async function syncVoiceCapture(phase){
+  const vc=state.voiceCapture;if(!vc||state.voiceTransitionBusy)return;
+  const active=vc.activeMeta;
+  const skipped=phase?.phase==='QUESTION'&&isQuestionSkipped(state.session,phase);
+  const shouldRecord=state.session?.stage==='RUNNING'&&phase?.phase==='QUESTION'&&!skipped;
+  const qIndex=Number(phase?.globalQuestionIndex);
+  if(active && (!shouldRecord || Number(active.questionIndex)!==qIndex)){
+    state.voiceTransitionBusy=true;
+    try{
+      const captured=await vc.stopQuestion();
+      if(captured){
+        const meta=captured.meta||{};
+        const wasSkipped=!!state.session?.skippedQuestions?.[String(meta.questionIndex)];
+        const feature={questionIndex:Number(meta.questionIndex),questionText:meta.questionText||'',setId:meta.setId||null,summary:captured.summary,frames:captured.frames,skipped:wasSkipped,mimeType:captured.mimeType,voiceMetricsVersion:VOICE_METRICS_VERSION};
+        await backend.saveVoiceFeature(state.sessionId,roleSide(),feature.questionIndex,feature);
+        processAiQuestion(captured,feature);
+      }
+    }finally{state.voiceTransitionBusy=false;}
+  }
+  if(shouldRecord&&!vc.activeMeta&&state.voiceStatus==='READY'){
+    vc.startQuestion({questionIndex:qIndex,questionText:phase.questionText||'',setId:phase.setId||null});
+  }
+}
+
 async function onHeartRate({bpm,receivedAtMs,deviceId}){
   if(!Number.isFinite(bpm)||bpm<25||bpm>240)return;
   state.bpm=bpm;state.lastSamples.push({bpm,t:receivedAtMs});if(state.lastSamples.length>120)state.lastSamples.shift();
@@ -462,7 +525,7 @@ function displayScreen(){
   if(s.stage==='ACCLIMATION')return phaseDisplay('CALIBRATING','心拍センサーをつけたまま、楽な姿勢でお待ちください。',(s.readyAtMs||now())-now());
   if(s.stage==='READY')return phaseDisplay(child?'じゅんび OK！':'SYSTEM READY',child?'スタッフがスタートするまで まっていてね。':'準備ができました。スタッフの案内をお待ちください。');
   if(s.stage==='POST_SURVEY')return phaseDisplay('MEASUREMENT COMPLETE','最後のアンケートに回答してください。');
-  if(s.stage==='CALCULATING')return phaseDisplay(child?'けっかを つくっているよ':'ANALYZING HEART REACTIONS',child?'二人のドキドキを しらべています。':'二人の心拍リアクションを解析しています。');
+  if(s.stage==='CALCULATING')return phaseDisplay(child?'けっかを つくっているよ':'ANALYZING REACTIONS',child?'ドキドキと こえを しらべています。':'心拍・声・会話リアクションを解析しています。');
   if(s.stage==='PAUSED')return phaseDisplay(child?'ちょっと まってね':'MEASUREMENT PAUSED',child?'スタッフが かくにんしています。':'しばらくお待ちください。');
   if(s.stage==='RUNNING'){
     const rt=runtimeInfo(s);if(!rt.phase)return phaseDisplay(child?'もうすぐ はじまるよ':'PREPARING',child?'そのまま まっていてね。':'まもなく始まります。',Math.max(0,(s.t0||now())-now()));
@@ -481,17 +544,17 @@ function displayScreen(){
 function explainDisplay(s){
   const child=!!(s.protocolId==='EVENT_V2'&&s.childSupport),event=s.protocolId==='EVENT_V2';
   const pages=child?[
-    {n:'01',title:'LOVE METER NEOって なに？',body:'二人で しつもんに こたえながら、うでのきかいで「ドキドキ」を はかるよ。',sub:'二人のドキドキが どんなふうに うごくかを見ながら、ドキドキと二人のつながりに どんなかんけいがあるかを けんきゅうしています。'},
+    {n:'01',title:'LOVE METER NEOって なに？',body:'二人で しつもんに こたえながら、「ドキドキ」と こえのへんかを はかるよ。',sub:'ドキドキや こえが どんなふうに うごくかを見ながら、二人のはんのうを けんきゅうしています。'},
     {n:'02',title:'どうするの？',body:'しつもんが でたら、二人とも こたえてみてね。',sub:'わからない・こたえたくない しつもんは、スタッフに言えばスキップできるよ。'},
-    {n:'03',title:'だいじょうぶだよ',body:'せいかいや まちがいは ありません。',sub:'うでのきかいが いたい・いやだと おもったら、すぐスタッフに おしえてね。'}
+    {n:'03',title:'だいじょうぶだよ',body:'せいかいや まちがいは ありません。',sub:'しつもんちゅうの こえはAIで ぶんせきします。LOVE METERには こえのファイルを のこしません。いやだと おもったらスタッフに おしえてね。'}
   ]:event?[
-    {n:'01',title:'LOVE METER NEOとは？',body:'二人で同じ質問に答えながら心拍を測り、二人の「心拍リアクション」を見える化する体験です。',sub:'心拍が同じ方向に動いたか、近いタイミングで反応したかなどを分析し、心拍反応と二人の関係とのつながりを調べています。'},
+    {n:'01',title:'LOVE METER NEOとは？',body:'二人で同じ質問に答えながら、心拍と声・会話の反応を測って見える化する体験です。',sub:'心拍の動きに加え、声の抑揚や会話の特徴も分析し、二人の反応と関係性のつながりを研究しています。'},
     {n:'02',title:'おねがい',body:'質問が表示されたら、二人とも自由に答えてください。',sub:'正解や不正解はありません。答えにくい質問は、スタッフに伝えればスキップできます。'},
-    {n:'03',title:'結果について',body:'NEO SCOREは、今回の心拍リアクションを分かりやすく表示する体験用スコアです。',sub:'「なかよし度」や「相性」を断定する点数ではありません。途中でやめたい場合は、いつでもスタッフに伝えてください。'}
+    {n:'03',title:'結果について',body:'結果は、今回の心拍・声・会話リアクションを分かりやすく表示する体験用スコアです。',sub:'「なかよし度」や「相性」を断定する点数ではありません。質問中の音声はAI分析に使い、生音声はLOVE METER側には保存しません。途中でやめたい場合はスタッフに伝えてください。'}
   ]:[
-    {n:'01',title:'LOVE METER NEO について',body:'二人が同じ質問に答えている間の心拍を同時に記録し、心拍反応の方向・大きさ・タイミングなどを分析する研究システムです。',sub:'二人の心拍リアクションと、親しさ・安心感・信頼などの自己申告との関係を調べます。'},
+    {n:'01',title:'LOVE METER NEO について',body:'二人が同じ質問に答えている間の心拍と音声を同時に記録し、心拍反応・声の特徴・会話内容を分析する研究システムです。',sub:'心拍・音声・会話特徴と、親しさ・安心感・信頼などの自己申告との関係を調べます。'},
     {n:'02',title:'この研究の目的',body:'実験データを積み重ね、二人の関係性にみられる特徴を0〜100の数値で表現できる指標をつくることを目指しています。',sub:'質問が表示されたら二人で自由に話してください。正解・不正解はありません。'},
-    {n:'03',title:'大切なこと',body:'心拍は緊張・運動・暑さ・体調などでも変化します。',sub:'LOVE METER NEOは心拍だけで「好き」「相性が良い」などを断定するものではありません。アンケートの回答は相手には表示されません。'}
+    {n:'03',title:'大切なこと',body:'心拍は緊張・運動・暑さ・体調などでも変化します。',sub:'LOVE METER NEOは心拍・音声・AIだけで「好き」「相性が良い」などを断定するものではありません。質問中の音声はAI分析に使い、生音声はLOVE METER側には保存しません。アンケート回答は相手には表示されません。'}
   ];
   const idx=clamp(Number(s.introPage||0),0,2),p=pages[idx];
   return shell(`<div class="display-center intro-display ${child?'child-intro-display':''}"><div class="intro-index">${p.n}</div><div class="eyebrow">${child?'こどもサポート':'PARTICIPANT GUIDE'}</div><h1>${esc(p.title)}</h1><p class="intro-main">${esc(p.body)}</p><p class="intro-sub">${esc(p.sub)}</p><div class="intro-dots">${pages.map((_,i)=>`<span class="${i===idx?'active':''}"></span>`).join('')}</div>${idx===2?`<p class="standby">${child?'スタッフが はじめるまで まっていてね。':'準備ができたら、スタッフの案内をお待ちください。'}</p>`:''}</div>`,{display:true});
@@ -508,20 +571,84 @@ function miniTimelineSvg(tl){
   const path=arr=>arr.map(p=>`${(p.t-minT)/(maxT-minT||1)*w},${h-(p.bpm-minB)/(maxB-minB||1)*h}`).join(' ');
   return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="A/B heart reaction timeline"><polyline class="lineA" points="${path(A)}"/><polyline class="lineB" points="${path(B)}"/></svg>`;
 }
+function scoreRank(score){
+  if(score>=95)return 'SSS';if(score>=90)return 'SS';if(score>=85)return 'S';if(score>=75)return 'A';if(score>=65)return 'B';return 'C';
+}
+function metricChip(label,value,suffix=''){
+  return `<div class="karaoke-metric"><small>${esc(label)}</small><strong>${Number.isFinite(value)?Math.round(value)+suffix:'—'}</strong></div>`;
+}
 function resultDisplay(s){
-  const d=s.displayResult||{},score=Number.isFinite(d.neoScore)?Math.round(d.neoScore):null,b=d.scoreBreakdown||s.metrics?.displayBreakdown||{},child=!!(s.protocolId==='EVENT_V2'&&s.childSupport);
-  if(score==null)return shell(`<div class="display-center ${child?'child-display':''}"><div class="eyebrow">${child?'けいそくが うまくできませんでした':'測定不成立 (MEASUREMENT INCOMPLETE)'}</div><h1>${child?'スタッフと もういちど かくにんしよう':'十分なデータを取得できませんでした'}</h1><p class="subtitle">${child?'スタッフのあんないを まってね。':'スタッフの案内に従って、必要に応じて再計測してください。'}</p><button class="btn btn-quiet" data-action="display-home">ホームへ戻る</button></div>`,{display:true});
-  const syncLabel=child?'いっしょに うごいた':'心拍シンクロ (SYNC)',reactionLabel=child?'ドキドキの おおきさ':'心拍リアクション (REACTION)';
-  const caption=child?'今回の二人のドキドキの動きを、わかりやすくした体験用スコアだよ。なかよし度を決める点数ではありません。':'二人の「反応の似かた」と「心拍に現れた反応の強さ」を合わせた体験用スコアです。<br>感情そのものや相性を断定する値ではありません。';
-  return shell(`<div class="result-page ${child?'child-result-page':''}"><div class="result-grid"><section class="score-block"><div class="eyebrow">NEO SCORE</div><div class="big-number">${score}</div><div class="score-components"><div><small>${syncLabel}</small><strong>${Number.isFinite(b.syncScore)?Math.round(b.syncScore):'—'}</strong></div><div><small>${reactionLabel}</small><strong>${Number.isFinite(b.reactionScore)?Math.round(b.reactionScore):'—'}</strong></div></div><div class="score-caption">${caption}</div></section><section class="radar-block">${radarSvg(d.radar||{},500,child)}</section><section class="reaction-block"><div class="section-title">${child?'こんかいの ドキドキ':'今回の反応パターン (REACTION STYLE)'}</div><h2>${esc(child?'二人のドキドキを5つの見方で見てみよう！':d.comment||'')}</h2><div class="section-title spaced">${child?'いちばん ドキドキした しつもん':'最も反応が大きかった質問 (MOST REACTIVE QUESTION)'}</div><div class="callout result-question">${esc(d.mostReactiveQuestion||'—')}</div><button class="btn btn-quiet result-home" data-action="display-home">ホームへ戻る</button></section></div><section class="timeline-block"><div class="timeline-head"><span>${child?'Aのドキドキ':'A 心拍リアクション (A HEART REACTION)'}</span><span>${child?'Bのドキドキ':'B 心拍リアクション (B HEART REACTION)'}</span></div>${miniTimelineSvg(d.miniTimeline)}</section></div>`,{display:true});
+  const d=s.displayResult||{},score=Number.isFinite(d.neoScore)?Math.round(d.neoScore):null,child=!!(s.protocolId==='EVENT_V2'&&s.childSupport);
+  if(score==null)return shell(`<div class="display-center ${child?'child-display':''}"><div class="eyebrow">測定不成立 (MEASUREMENT INCOMPLETE)</div><h1>十分なデータを取得できませんでした</h1><p class="subtitle">スタッフの案内に従って、必要に応じて再計測してください。</p><button class="btn btn-quiet" data-action="display-home">ホームへ戻る</button></div>`,{display:true});
+  const rank=d.rank||scoreRank(score),heart=d.heartScore,voice=d.voiceScore,bonus=d.aiTalkBonus||0,vm=d.voiceMetrics||{};
+  const comment=d.aiComment||d.comment||'今回のリアクションをチェックしてみよう！';
+  return shell(`<div class="result-page karaoke-result ${child?'child-result-page':''}">
+    <div class="result-sparkles" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+    <div class="karaoke-head"><div><div class="eyebrow">HEART × VOICE × AI TALK</div><h1>LOVE METER RESULT</h1></div><div class="karaoke-beta">EXPERIENCE SCORE β</div></div>
+    <section class="karaoke-hero">
+      <div class="score-orbit"><div class="score-ring"><small>SCORE</small><strong>${score}</strong><span>pts</span></div><div class="rank-badge"><small>RANK</small><b>${esc(rank)}</b></div></div>
+      <div class="karaoke-breakdown">
+        <div class="score-lane heart-lane"><span>HEART</span><b>${Number.isFinite(heart)?Math.round(heart):'—'}</b><i style="--v:${Number.isFinite(heart)?clamp(heart,0,100):0}%"></i></div>
+        <div class="score-lane voice-lane"><span>VOICE</span><b>${Number.isFinite(voice)?Math.round(voice):'—'}</b><i style="--v:${Number.isFinite(voice)?clamp(voice,0,100):0}%"></i></div>
+        <div class="score-lane bonus-lane"><span>AI TALK BONUS</span><b>+${Math.round(bonus)}</b><i style="--v:${clamp((bonus/CONFIG.experienceScore.aiTalkBonusMax)*100,0,100)}%"></i></div>
+      </div>
+      <div class="ai-comment-card"><div class="ai-comment-label">AI RESULT COMMENT</div><p>“${esc(comment)}”</p></div>
+    </section>
+    <section class="karaoke-detail-grid">
+      <div class="karaoke-panel"><div class="section-title">VOICE ANALYSIS β</div><div class="karaoke-metrics">${metricChip('PITCH DYNAMICS β',vm.pitchResponse)}${metricChip('EXPRESSIVENESS',vm.expressiveness)}${metricChip('SPEECH BALANCE',vm.speechBalance)}${metricChip('TURN TAKING',vm.turnTaking)}</div></div>
+      <div class="karaoke-panel radar-mini"><div class="section-title">HEART 5 METRICS</div>${radarSvg(d.radar||{},360,child)}</div>
+      <div class="karaoke-panel"><div class="section-title">MOST REACTIVE QUESTION</div><div class="result-question karaoke-question">${esc(d.mostReactiveQuestion||'—')}</div><div class="ai-talk-note"><b>AI TALK BONUS</b><span>${d.aiTalkSummary?esc(d.aiTalkSummary):'会話内容は補助的なボーナス評価です。'}</span></div></div>
+    </section>
+    <div class="karaoke-disclaimer">このスコアは体験用β版です。心拍・声・AIだけで、親密さ・恋愛感情・相性を断定するものではありません。</div>
+    <button class="btn btn-quiet result-home karaoke-home" data-action="display-home">ホームへ戻る</button>
+  </div>`,{display:true});
+}
+async function loadSupplementalForResult(sessionId,expectedQuestions){
+  let voiceA=[],voiceB=[],ai=[];
+  for(let i=0;i<4;i++){
+    [voiceA,voiceB,ai]=await Promise.all([backend.loadVoiceFeatures(sessionId,'A'),backend.loadVoiceFeatures(sessionId,'B'),backend.loadAiAnalyses(sessionId)]);
+    if(voiceA.length>=expectedQuestions&&voiceB.length>=expectedQuestions&&ai.length>=Math.max(1,expectedQuestions-1))break;
+    await new Promise(r=>setTimeout(r,550));
+  }
+  return {voiceA,voiceB,ai};
 }
 async function calculateResults(){
   const s=await backend.loadSession(state.sessionId);await backend.flushOutbox();const a=await backend.loadHr(s.sessionId,'A'),b=await backend.loadHr(s.sessionId,'B');
   const skippedQuestionIndexes=Object.keys(s.skippedQuestions||{}).map(Number).filter(Number.isFinite);
-  const result=computeSessionMetrics({aSamples:a,bSamples:b,timeline:s.timeline,protocolId:s.protocolId,skippedQuestionIndexes});const most=result.perQuestion.filter(x=>!x.skipped&&Number.isFinite(x.pairQResponse)).sort((x,y)=>y.pairQResponse-x.pairQResponse)[0];
-  const display={neoScore:result.session.neoScore,radar:result.session.radar,scoreBreakdown:result.session.displayBreakdown,mostReactiveQuestion:most?.question?.questionText||null,comment:reactionComment(result.session),miniTimeline:buildMiniTimeline(result.cleanA,result.cleanB)};
-  await backend.updateSession(s.sessionId,{stage:'RESULT',status:SESSION_STATUS.COMPLETE,metrics:result.session,questionMetrics:result.perQuestion,quality:result.quality,displayResult:display,completedAt:now()});await backend.appendAuditLog(s.sessionId,{eventType:'RESULT_CALCULATED',details:{quality:result.quality?.label,score:display.neoScore,skippedQuestionIndexes}});
+  const result=computeSessionMetrics({aSamples:a,bSamples:b,timeline:s.timeline,protocolId:s.protocolId,skippedQuestionIndexes});
+  const expectedQuestions=(s.timeline||[]).filter(x=>x.phase==='QUESTION'&&!skippedQuestionIndexes.includes(Number(x.globalQuestionIndex))).length;
+  const supplemental=await loadSupplementalForResult(s.sessionId,expectedQuestions);
+  const validA=supplemental.voiceA.filter(x=>!x.skipped),validB=supplemental.voiceB.filter(x=>!x.skipped);
+  const voiceMetrics=computeVoiceSessionMetrics(validA,validB);
+  const aiRows=supplemental.ai.filter(x=>!skippedQuestionIndexes.includes(Number(x.questionIndex)));
+  const aiTalkBonus=clamp(aiRows.reduce((sum,x)=>sum+Number(x.bonus||x.analysis?.bonus||0),0),0,CONFIG.experienceScore.aiTalkBonusMax);
+  const heartScore=result.session.neoScore,voiceScore=voiceMetrics.valid?voiceMetrics.voiceScore:null;
+  const baseScore=Number.isFinite(heartScore)&&Number.isFinite(voiceScore)
+    ?CONFIG.experienceScore.heartWeight*heartScore+CONFIG.experienceScore.voiceWeight*voiceScore
+    :heartScore;
+  const finalScore=Number.isFinite(baseScore)?clamp(baseScore+aiTalkBonus,0,100):null;
+  const most=result.perQuestion.filter(x=>!x.skipped&&Number.isFinite(x.pairQResponse)).sort((x,y)=>y.pairQResponse-x.pairQResponse)[0];
+  const aiTalkSummary=aiRows.map(x=>x.analysis?.summary).filter(Boolean).slice(0,2).join(' / ');
+  const highlights=[];
+  if(Number.isFinite(voiceMetrics.turnTaking))highlights.push(`会話交代 ${Math.round(voiceMetrics.turnTaking)}点`);
+  if(Number.isFinite(voiceMetrics.speechBalance))highlights.push(`発話バランス ${Math.round(voiceMetrics.speechBalance)}点`);
+  if(Number.isFinite(result.session.balance))highlights.push(`心拍Balance ${Math.round(result.session.balance)}点`);
+  if(aiTalkSummary)highlights.push(aiTalkSummary);
+  let aiComment=null;
+  try{
+    const generated=await generateResultComment({heartScore,voiceScore,aiTalkBonus,finalScore,highlights,variationSeed:Math.floor(Math.random()*1000000)});
+    aiComment=generated?.comment||null;
+  }catch(e){console.warn('AI result comment failed',e);}
+  const display={
+    neoScore:finalScore,heartScore,voiceScore,aiTalkBonus,rank:Number.isFinite(finalScore)?scoreRank(finalScore):null,
+    radar:result.session.radar,scoreBreakdown:result.session.displayBreakdown,voiceMetrics,
+    mostReactiveQuestion:most?.question?.questionText||null,comment:reactionComment(result.session),aiComment:aiComment||reactionComment(result.session),aiTalkSummary,
+    miniTimeline:buildMiniTimeline(result.cleanA,result.cleanB),
+  };
+  await backend.updateSession(s.sessionId,{stage:'RESULT',status:SESSION_STATUS.COMPLETE,metrics:result.session,questionMetrics:result.perQuestion,quality:result.quality,voiceMetrics,aiTalkAnalysis:aiRows,displayResult:display,completedAt:now()});
+  await backend.appendAuditLog(s.sessionId,{eventType:'RESULT_CALCULATED',details:{quality:result.quality?.label,heartScore,voiceScore,aiTalkBonus,finalScore,skippedQuestionIndexes}});
 }
+
 function reactionComment(m){
   const d=m.displayBreakdown||{},sync=d.syncScore,reaction=d.reactionScore;
   if(!Number.isFinite(sync)||!Number.isFinite(reaction))return '今回は十分なデータを取得できませんでした。';
@@ -685,7 +812,7 @@ function bindDynamic(){
 
 async function handleAction(a,el){
   if(a==='display-home')return clearRole();if(a==='home')return clearRole();if(a==='create-session')return createSession();if(a==='join-session')return joinSession();
-  if(a==='connect-hw9')return connectSensor(false);if(a==='connect-demo')return connectSensor(true);
+  if(a==='connect-hw9')return connectSensor(false);if(a==='connect-demo')return connectSensor(true);if(a==='connect-mic')return connectMicrophone();
   if(a==='open-pre-survey'){state.surveyStage='pre';state.surveySide=roleSide();return render();}if(a==='open-post-survey'){state.surveyStage='post';state.surveySide=roleSide();return render();}
   if(a==='cancel-survey'){if(confirm('アンケートを閉じて運用画面へ戻りますか？入力中の内容は保存されません。')){state.surveyStage=null;state.surveySide=null;render();}return;}
   if(a==='staff-return'){if(confirm('実験担当者の操作画面へ戻りますか？')){state.surveyLocked=null;await refreshSession();render();}return;}

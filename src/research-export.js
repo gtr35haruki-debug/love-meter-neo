@@ -2,7 +2,8 @@
  * This module has no Firebase dependency; it builds one standards-compliant ZIP32 file
  * from already loaded per-session records. Never use this ZIP as proof of consent to share.
  */
-import { preprocess } from './metrics.js?v=0.3.4';
+import { preprocess } from './metrics.js?v=0.4.0b1';
+import { APP_VERSION } from './config.js?v=0.4.0b1';
 
 export const EXPORT_VERSION='EXPORT_V1';
 const enc=new TextEncoder();
@@ -16,7 +17,7 @@ export function redact(value,{freeText=false}={}){
     const result={};
     for(const [key,v] of Object.entries(value)){
       if(BLOCKED_KEY.test(key)||BLOCKED_CONTAINS.test(key))continue;
-      if(!freeText&&/^(?:freetext|relationshipother|notes?|comment|comments|memo)$/i.test(key))continue;
+      if(!freeText&&/^(?:freetext|relationshipother|notes?|comment|comments|memo|transcript|summary|evidence)$/i.test(key))continue;
       result[key]=redact(v,{freeText});
     }
     return result;
@@ -53,6 +54,9 @@ export function buildExportFiles(bundles,{includeSurveys=true,includeFreeText=fa
     const a=redact(bundle.rawA||[]),b=redact(bundle.rawB||[]);
     const logs=redact(bundle.auditLogs||[],{freeText:includeFreeText});
     const surveys=includeSurveys?redact(bundle.surveys||{},{freeText:includeFreeText}):null;
+    const voiceA=redact(bundle.voiceA||[],{freeText:includeFreeText});
+    const voiceB=redact(bundle.voiceB||[],{freeText:includeFreeText});
+    const aiTalk=redact(bundle.aiTalk||[],{freeText:includeFreeText});
     const qa=(s.questionMetrics||[]);
     const gridA=preprocess(a).filter(x=>x.elapsedMs>=0),gridB=preprocess(b).filter(x=>x.elapsedMs>=0);
     const directory=`sessions/${safeSlug(id)}_${safeSlug(s.sessionId)}/`;
@@ -67,15 +71,18 @@ export function buildExportFiles(bundles,{includeSurveys=true,includeFreeText=fa
     }
     if(s.status!=='COMPLETE')warnings.push(`完了していないセッションです（${s.status||'不明'}）。`);
     if(surveys&&s.protocolId==='RESEARCH_V1')for(const side of ['A','B'])for(const stage of ['pre','post'])if(!surveys?.[side]?.[stage])warnings.push(`${side}側の${stage}アンケートがありません。`);
-    const entry={session:s,heartRateRaw:{A:a,B:b},heartRate1Hz:{A:gridA,B:gridB},auditLogs:logs,...(includeSurveys?{questionnaires:surveys}:{})};
+    const entry={session:s,heartRateRaw:{A:a,B:b},heartRate1Hz:{A:gridA,B:gridB},voiceFeatures:{A:voiceA,B:voiceB},aiTalkAnalysis:aiTalk,auditLogs:logs,...(includeSurveys?{questionnaires:surveys}:{})};
     dataset.push(entry);
-    manifest.push({sessionId:s.sessionId,displayId:id,protocolId:s.protocolId,status:s.status,rawCountA:a.length,rawCountB:b.length,oneHzCountA:gridA.length,oneHzCountB:gridB.length,auditCount:logs.length,hasQuestionnaires:!!includeSurveys,warnings});
+    manifest.push({sessionId:s.sessionId,displayId:id,protocolId:s.protocolId,status:s.status,rawCountA:a.length,rawCountB:b.length,oneHzCountA:gridA.length,oneHzCountB:gridB.length,voiceCountA:voiceA.length,voiceCountB:voiceB.length,aiTalkCount:aiTalk.length,auditCount:logs.length,hasQuestionnaires:!!includeSurveys,warnings});
     files.push([directory+'session.json',json(s)]);
     files.push([directory+'metrics.json',json(s.metrics??null)]);
     files.push([directory+'display_result.json',json(s.displayResult??null)]);
     files.push([directory+'quality.json',json(quality)]);
     files.push([directory+'questions.json',json({questionBankVersion:s.questionBankVersion,setOrder:s.setOrder,questionCategory:s.questionCategory,timeline:s.timeline||[],skippedQuestions:s.skippedQuestions||{}})]);
     files.push([directory+'question_metrics.json',json(qa)]);
+    files.push([directory+'voice_features_A.json',json(voiceA)]);
+    files.push([directory+'voice_features_B.json',json(voiceB)]);
+    files.push([directory+'ai_talk_analysis.json',json(aiTalk)]);
     files.push([directory+'heart_rate_raw_A.json',json(a)]);
     files.push([directory+'heart_rate_raw_B.json',json(b)]);
     for(const [side,arr] of [['A',a],['B',b]])files.push([directory+`heart_rate_raw_${side}.csv`,csv([RAW_HEADER,...arr.map(x=>rowFromSample(s,side,x))])]);
@@ -86,14 +93,14 @@ export function buildExportFiles(bundles,{includeSurveys=true,includeFreeText=fa
     if(includeSurveys)files.push([directory+'questionnaires.json',json(surveys)]);
     summary.push([id,s.sessionId,new Date(s.createdAt||0).toISOString(),s.protocolId,s.participantAId,s.participantBId,s.questionCategory,s.setOrder,s.status,quality.label,quality.coverageA,quality.coverageB,quality.maxContinuousGapSec,s.metrics?.direction,s.metrics?.temporal,s.metrics?.magnitude,s.metrics?.balance,s.metrics?.questionResponse,s.displayResult?.neoScore??s.metrics?.neoScore,s.displayScoreVersion,s.appVersion,a.length,b.length]);
   }
-  const meta={exportVersion:EXPORT_VERSION,exportedAt,sessionCount:dataset.length,appVersionUsedForExport:'0.3.4',included:{raw:true,oneHz:true,session:true,metrics:true,questionMetrics:true,audit:true,surveys:includeSurveys,freeText:includeSurveys&&includeFreeText},manifest};
+  const meta={exportVersion:EXPORT_VERSION,exportedAt,sessionCount:dataset.length,appVersionUsedForExport:APP_VERSION,included:{raw:true,oneHz:true,voiceFeatures:true,aiTalkAnalysis:true,session:true,metrics:true,questionMetrics:true,audit:true,surveys:includeSurveys,freeText:includeSurveys&&includeFreeText},manifest};
   files.unshift(['export_manifest.json',json(meta)],['session_list.csv',csv(summary)],['all_sessions.json',json({...meta,sessions:dataset})]);
   const notice=[
     `LOVE METER NEO — ${EXPORT_VERSION}`,
     `Exported at (ISO): ${exportedAt}`,
     `Sessions: ${dataset.length}`,
     'This single ZIP is a snapshot of multiple experiments. It does NOT change the original database.',
-    'all_sessions.json: every selected session, both original RAW streams, derived 1 Hz streams, metrics, quality, events, and optionally research questionnaires.',
+    'all_sessions.json: every selected session, both original RAW streams, derived 1 Hz streams, voice features, AI talk analysis, metrics, quality, events, and optionally research questionnaires.',
     'session_list.csv: summary; sessions/: separate files for spreadsheet and programmatic analysis.',
     'Original timestamps and participant research IDs are preserved; authentication data, device IDs, names/contact keys are omitted.',
     'Research IDs remain pseudonymous and can be linked across sessions. Treat this archive as private research material.',

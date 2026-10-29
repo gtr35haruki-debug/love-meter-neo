@@ -1,4 +1,4 @@
-import { CONFIG } from './config.js?v=0.3.4';
+import { CONFIG } from './config.js?v=0.4.0b1';
 
 const mean = xs => xs.length ? xs.reduce((a,b)=>a+b,0)/xs.length : null;
 const median = xs => {
@@ -177,7 +177,17 @@ export function qResponseMetric(series,qStart,qEnd,localStart,localEnd,setBaseSt
   const setbase=series.filter(p=>p.elapsedMs>=setBaseStart&&p.elapsedMs<setBaseEnd&&Number.isFinite(p.cleanBpm));
   const localBaseline=median(local.map(p=>p.cleanBpm));
   const setBaseline=median(setbase.map(p=>p.cleanBpm));
-  if(local.length<CONFIG.metrics.localBaselineValidSeconds || localBaseline==null) return {valid:false,reason:'LOCAL_BASELINE_INVALID'};
+  // The available local-baseline window differs by protocol.
+  // RESEARCH_V1 normally gives us a 15 s slice, while EVENT_V2 has only
+  // a 10 s RESET before Q2/Q3. Requiring a fixed 12 valid seconds made
+  // EVENT_V2 Q2/Q3 impossible by construction. Keep the original 80%
+  // coverage rule, capped at the legacy 12-second requirement.
+  const localWindowSec=Math.max(0,Math.round((localEnd-localStart)/1000));
+  const requiredLocalValidSeconds=Math.min(
+    CONFIG.metrics.localBaselineValidSeconds,
+    Math.max(1,Math.ceil(localWindowSec*0.8))
+  );
+  if(local.length<requiredLocalValidSeconds || localBaseline==null) return {valid:false,reason:'LOCAL_BASELINE_INVALID',requiredLocalValidSeconds,localValidSeconds:local.length};
   const preAbs=mean(local.map(p=>Math.abs(p.cleanBpm-localBaseline))) || 0;
   const qAbs=mean(question.map(p=>Math.abs(p.cleanBpm-localBaseline)));
   const signed=mean(question.map(p=>p.cleanBpm-localBaseline));
@@ -260,20 +270,36 @@ export function computeSessionMetrics({aSamples,bSamples,timeline,protocolId,ski
   const minCoverage=Math.min(coverageA,coverageB),maxContinuousGapSec=Math.max(qa.maxGap,qb.maxGap);
   const qualityLabel=minCoverage<CONFIG.metrics.qcCaution?'INVALID':(minCoverage<CONFIG.metrics.qcGood||maxContinuousGapSec>=CONFIG.metrics.sessionContinuousGapCautionSec)?'CAUTION':'GOOD';
 
-  // DISPLAY_SCORE_V2_PILOT: 50% pair synchrony + 50% heart-reaction strength.
-  // Scientific raw metrics above remain unchanged and are stored separately.
-  const anchors=CONFIG.displayScalePilot.anchors,w=CONFIG.displayScalePilot.weights;
+  // DISPLAY_SCORE_V3_PILOT.
+  // Keep the previous V2 score for A/B comparison, but use the exploratory V3
+  // weighting for the beta display. Scientific raw metrics remain unchanged.
+  const anchors=CONFIG.displayScalePilot.anchors;
+  const legacyW=CONFIG.displayScalePilot.legacyWeights;
+  const v3W=CONFIG.displayScalePilot.v3Weights;
   const directionDisplay=pilotDisplayScale(directionSession,anchors.direction);
   const temporalDisplay=pilotDisplayScale(temporalSession,anchors.temporal);
   const magnitudeDisplay=pilotDisplayScale(magnitudeSession,anchors.magnitude);
   const qResponseDisplay=pilotDisplayScale(qResponseSession,anchors.questionResponse);
-  const displayReady=[directionDisplay,temporalDisplay,magnitudeDisplay,qResponseDisplay].every(Number.isFinite);
-  const syncScore=displayReady?(w.direction*directionDisplay+w.temporal*temporalDisplay)/(w.direction+w.temporal):null;
-  const reactionScore=displayReady?(w.magnitude*magnitudeDisplay+w.questionResponse*qResponseDisplay)/(w.magnitude+w.questionResponse):null;
-  const score=(qualityLabel!=='INVALID'&&displayReady)?w.direction*directionDisplay+w.temporal*temporalDisplay+w.magnitude*magnitudeDisplay+w.questionResponse*qResponseDisplay:null;
-  const radar={direction:directionDisplay,temporal:temporalDisplay,balance:balanceSession,magnitude:magnitudeDisplay,questionResponse:qResponseDisplay};
-  const displayBreakdown={syncScore,reactionScore,direction:directionDisplay,temporal:temporalDisplay,magnitude:magnitudeDisplay,questionResponse:qResponseDisplay};
-  return {cleanA:a,cleanB:b,perQuestion,quality:{coverageA,coverageB,maxContinuousGapSec,label:qualityLabel},session:{direction:directionSession,temporal:temporalSession,magnitude:magnitudeSession,balance:balanceSession,questionResponse:qResponseSession,neoScore:score,radar,displayBreakdown,quality:{coverageA,coverageB,maxContinuousGapSec,label:qualityLabel}}};
+  const balanceDisplay=Number.isFinite(balanceSession)?Math.max(0,Math.min(100,balanceSession)):null;
+  const legacyReady=[directionDisplay,temporalDisplay,magnitudeDisplay,qResponseDisplay].every(Number.isFinite);
+  const legacyScore=(qualityLabel!=='INVALID'&&legacyReady)
+    ?legacyW.direction*directionDisplay+legacyW.temporal*temporalDisplay+legacyW.magnitude*magnitudeDisplay+legacyW.questionResponse*qResponseDisplay
+    :null;
+  const syncParts=[[directionDisplay,legacyW.direction],[temporalDisplay,legacyW.temporal]].filter(([v])=>Number.isFinite(v));
+  const reactionParts=[[magnitudeDisplay,legacyW.magnitude],[qResponseDisplay,legacyW.questionResponse]].filter(([v])=>Number.isFinite(v));
+  const weighted=(parts)=>{const den=parts.reduce((s,[,w])=>s+w,0);return den?parts.reduce((s,[v,w])=>s+v*w,0)/den:null;};
+  const syncScore=weighted(syncParts),reactionScore=weighted(reactionParts);
+  const v3Parts=[
+    [directionDisplay,v3W.direction,'direction'],[temporalDisplay,v3W.temporal,'temporal'],
+    [magnitudeDisplay,v3W.magnitude,'magnitude'],[qResponseDisplay,v3W.questionResponse,'questionResponse'],
+    [balanceDisplay,v3W.balance,'balance'],
+  ].filter(([v])=>Number.isFinite(v));
+  const availableWeight=v3Parts.reduce((sum,[,w])=>sum+w,0);
+  const score=(qualityLabel!=='INVALID'&&availableWeight>=0.55)
+    ?v3Parts.reduce((sum,[v,w])=>sum+v*w,0)/availableWeight:null;
+  const radar={direction:directionDisplay,temporal:temporalDisplay,balance:balanceDisplay,magnitude:magnitudeDisplay,questionResponse:qResponseDisplay};
+  const displayBreakdown={syncScore,reactionScore,direction:directionDisplay,temporal:temporalDisplay,magnitude:magnitudeDisplay,questionResponse:qResponseDisplay,balance:balanceDisplay,availableWeight,legacyNeoScore:legacyScore};
+  return {cleanA:a,cleanB:b,perQuestion,quality:{coverageA,coverageB,maxContinuousGapSec,label:qualityLabel},session:{direction:directionSession,temporal:temporalSession,magnitude:magnitudeSession,balance:balanceSession,questionResponse:qResponseSession,neoScore:score,legacyNeoScore:legacyScore,radar,displayBreakdown,quality:{coverageA,coverageB,maxContinuousGapSec,label:qualityLabel}}};
 }
 
 export {mean,median,pearson};
