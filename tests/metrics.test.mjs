@@ -38,3 +38,27 @@ assert.equal(skippedResult.perQuestion.length,3);
 assert.equal(skippedResult.perQuestion[1].skipped,true);
 assert.equal(skippedResult.perQuestion[1].skipReason,'QUESTION_SKIPPED');
 console.log('skipped question exclusion regression passed');
+
+// EVENT_V2 regression: Q2/Q3 have only a 10-second RESET local baseline.
+// 80% coverage (8 valid seconds) must be sufficient; the old fixed 12-second
+// rule made these questions invalid by construction.
+const eventTimeline=[
+  {phase:'BASELINE',durationSec:30,startOffsetMs:0,endOffsetMs:30000,setIndex:0,setId:'A'},
+  {phase:'QUESTION',durationSec:20,startOffsetMs:30000,endOffsetMs:50000,setIndex:0,setId:'A',questionIndex:0,globalQuestionIndex:0,questionText:'Q1'},
+  {phase:'RESET',durationSec:10,startOffsetMs:50000,endOffsetMs:60000,setIndex:0,setId:'A'},
+  {phase:'QUESTION',durationSec:20,startOffsetMs:60000,endOffsetMs:80000,setIndex:0,setId:'A',questionIndex:1,globalQuestionIndex:1,questionText:'Q2'},
+  {phase:'RESET',durationSec:10,startOffsetMs:80000,endOffsetMs:90000,setIndex:0,setId:'A'},
+  {phase:'QUESTION',durationSec:20,startOffsetMs:90000,endOffsetMs:110000,setIndex:0,setId:'A',questionIndex:2,globalQuestionIndex:2,questionText:'Q3'},
+  {phase:'RECOVERY',durationSec:10,startOffsetMs:110000,endOffsetMs:120000,setIndex:0,setId:'A'},
+];
+const eventHr=Array.from({length:120},(_,i)=>({sessionElapsedMs:i*1000,bpm:70+Math.sin(i/5)*5,phase:'BASELINE'}));
+const eventResult=computeSessionMetrics({aSamples:eventHr,bSamples:eventHr,timeline:eventTimeline,protocolId:'EVENT_V2'});
+assert.equal(eventResult.perQuestion[0].qResponseA.valid,true);
+assert.equal(eventResult.perQuestion[1].qResponseA.valid,true);
+assert.equal(eventResult.perQuestion[2].qResponseA.valid,true);
+console.log('EVENT_V2 local-baseline regression passed');
+assert(Number.isFinite(eventResult.session.neoScore));
+assert(Number.isFinite(eventResult.session.legacyNeoScore));
+assert(Number.isFinite(eventResult.session.displayBreakdown.balance));
+assert(eventResult.session.displayBreakdown.availableWeight>=0.55);
+console.log('DISPLAY_SCORE_V3_PILOT regression passed');
