@@ -495,8 +495,7 @@ async function measureVoiceBaseline(){
   try{
     await backend.updateSession(state.sessionId,{voiceBaselineActiveSide:side});
     const rec=await vc.captureBaseline(CONFIG.voice.baselineDurationMs);
-    if(!rec?.quality?.valid){alert('基準声を十分に取得できませんでした。
-10秒間、普段の声量で話し続けてもう一度測定してください。');return;}
+    if(!rec?.quality?.valid){alert('基準声を十分に取得できませんでした。\n10秒間、普段の声量で話し続けてもう一度測定してください。');return;}
     const data={summary:rec.summary,frames:rec.frames,quality:rec.quality,durationMs:rec.durationMs,prompt,micMeta:{...(state.micMeta||rec.deviceMeta||{}),connectionType:state.micConnectionType},voiceMetricsVersion:VOICE_METRICS_VERSION,capturedAt:now()};
     state.voiceBaseline=data;vc.setBaselineSummary(rec.summary);await backend.saveVoiceBaseline(state.sessionId,side,data);
     await backend.appendAuditLog(state.sessionId,{eventType:'VOICE_BASELINE_READY',details:{side,durationMs:rec.durationMs,prompt,pitchMeanHz:rec.summary?.pitchMeanHz,pitchStdHz:rec.summary?.pitchStdHz,rmsMean:rec.summary?.rmsMean,speechRatio:rec.summary?.speechRatio,connectionType:state.micConnectionType}});await refreshSession();
