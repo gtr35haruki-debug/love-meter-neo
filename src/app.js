@@ -664,6 +664,8 @@ function resultDisplay(s){
   if(score==null)return shell(`<div class="display-center ${child?'child-display':''}"><div class="eyebrow">測定不成立 (MEASUREMENT INCOMPLETE)</div><h1>十分なデータを取得できませんでした</h1><p class="subtitle">スタッフの案内に従って、必要に応じて再計測してください。</p><button class="btn btn-quiet" data-action="display-home">ホームへ戻る</button></div>`,{display:true});
   const rank=d.rank||scoreRank(score),heart=d.heartScore,voice=d.voiceScore,bonus=d.aiTalkBonus||0,vm=d.voiceMetrics||{};
   const comment=d.aiComment||d.comment||'今回のリアクションをチェックしてみよう！';
+  const commentLabel=d.aiCommentFallback?'RESULT COMMENT':'AI RESULT COMMENT';
+  const aiTalkNote=d.aiTalkStatus==='READY'?(d.aiTalkSummary||'会話内容を補助的に分析しました。'):d.aiTalkStatus==='PARTIAL'?'AI会話分析は一部のみ完了しました。':'AI会話分析は成立せず、ボーナス加点なしです。';
   return shell(`<div class="result-page karaoke-result ${child?'child-result-page':''}">
     <div class="result-sparkles" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
     <div class="karaoke-head"><div><div class="eyebrow">HEART × VOICE × AI TALK</div><h1>LOVE METER RESULT</h1></div><div class="karaoke-beta">EXPERIENCE SCORE β</div></div>
@@ -674,12 +676,12 @@ function resultDisplay(s){
         <div class="score-lane voice-lane"><span>VOICE</span><b>${Number.isFinite(voice)?Math.round(voice):'—'}</b><i style="--v:${Number.isFinite(voice)?clamp(voice,0,100):0}%"></i></div>
         <div class="score-lane bonus-lane"><span>AI TALK BONUS</span><b>+${Math.round(bonus)}</b><i style="--v:${clamp((bonus/CONFIG.experienceScore.aiTalkBonusMax)*100,0,100)}%"></i></div>
       </div>
-      <div class="ai-comment-card"><div class="ai-comment-label">AI RESULT COMMENT</div><p>“${esc(comment)}”</p></div>
+      <div class="ai-comment-card"><div class="ai-comment-label">${esc(commentLabel)}</div><p>“${esc(comment)}”</p></div>
     </section>
     <section class="karaoke-detail-grid">
       <div class="karaoke-panel"><div class="section-title">VOICE ANALYSIS β</div><div class="karaoke-metrics">${metricChip('PITCH DYNAMICS β',vm.pitchResponse)}${metricChip('EXPRESSIVENESS',vm.expressiveness)}${metricChip('SPEECH BALANCE',vm.speechBalance)}${metricChip('TURN TAKING',vm.turnTaking)}</div></div>
       <div class="karaoke-panel radar-mini"><div class="section-title">HEART 5 METRICS</div>${radarSvg(d.radar||{},360,child)}</div>
-      <div class="karaoke-panel"><div class="section-title">MOST REACTIVE QUESTION</div><div class="result-question karaoke-question">${esc(d.mostReactiveQuestion||'—')}</div><div class="ai-talk-note"><b>AI TALK BONUS</b><span>${d.aiTalkSummary?esc(d.aiTalkSummary):'会話内容は補助的なボーナス評価です。'}</span></div></div>
+      <div class="karaoke-panel"><div class="section-title">MOST REACTIVE QUESTION</div><div class="result-question karaoke-question">${esc(d.mostReactiveQuestion||'—')}</div><div class="ai-talk-note"><b>AI TALK BONUS</b><span>${esc(aiTalkNote)}</span></div></div>
     </section>
     <div class="karaoke-disclaimer">このスコアは体験用β版です。心拍・声・AIだけで、親密さ・恋愛感情・相性を断定するものではありません。</div>
     <button class="btn btn-quiet result-home karaoke-home" data-action="display-home">ホームへ戻る</button>
@@ -705,15 +707,15 @@ async function ensureAiTalkAnalyses(sessionId,supplemental,skippedQuestionIndexe
   const byQ=new Map();for(const t of supplemental.transcripts||[]){const q=Number(t.questionIndex);if(!Number.isFinite(q))continue;const row=byQ.get(q)||{};row[t.side]=t;byQ.set(q,row);}
   const voiceByQ=new Map([...(supplemental.voiceA||[]),...(supplemental.voiceB||[])].map(x=>[Number(x.questionIndex),x]));
   for(const [q,row] of [...byQ.entries()].sort((a,b)=>a[0]-b[0])){
-    if(skippedQuestionIndexes.includes(q)||existing.has(q))continue;
+    if(skippedQuestionIndexes.includes(q)||(existing.has(q)&&existing.get(q)?.ok!==false))continue;
     if(CONFIG.ai.requireBothTranscriptsForBonus&&(!row.A||!row.B))continue;
     const transcriptA=String(row.A?.transcript||''),transcriptB=String(row.B?.transcript||'');
     if(!transcriptA&&!transcriptB)continue;
     const questionText=row.A?.questionText||row.B?.questionText||voiceByQ.get(q)?.questionText||'';
     try{
       const ai=await analyzeConversationTranscripts({sessionId,questionIndex:q,questionText,transcriptA,transcriptB});
-      if(ai){const saved={...ai,questionText,transcriptSides:{A:!!row.A,B:!!row.B},aiTalkVersion:AI_TALK_VERSION};await backend.saveAiAnalysis(sessionId,q,saved);existing.set(q,{...saved,questionIndex:q});}
-    }catch(e){console.warn('AI paired talk analysis failed',e);await backend.appendAuditLog(sessionId,{eventType:'AI_TALK_FAILED',details:{questionIndex:q,message:String(e?.message||e).slice(0,160)}}).catch(()=>{});}
+      if(ai){const saved={...ai,questionText,transcriptSides:{A:!!row.A,B:!!row.B},aiTalkVersion:AI_TALK_VERSION,savedAt:now()};await backend.saveAiAnalysis(sessionId,q,saved);existing.set(q,{...saved,questionIndex:q});if(ai.ok===false)await backend.appendAuditLog(sessionId,{eventType:'AI_TALK_REJECTED',details:{questionIndex:q,code:ai.errorCode||'INVALID_OUTPUT',message:String(ai.errorMessage||'').slice(0,160)}}).catch(()=>{});}
+    }catch(e){console.warn('AI paired talk analysis failed',e);const failed={ok:false,analysis:null,bonus:0,errorCode:'AI_TALK_EXCEPTION',errorMessage:String(e?.message||e).slice(0,180),questionText,transcriptSides:{A:!!row.A,B:!!row.B},aiTalkVersion:AI_TALK_VERSION,savedAt:now()};await backend.saveAiAnalysis(sessionId,q,failed).catch(()=>{});existing.set(q,{...failed,questionIndex:q});await backend.appendAuditLog(sessionId,{eventType:'AI_TALK_FAILED',details:{questionIndex:q,message:failed.errorMessage}}).catch(()=>{});}
   }
   return [...existing.values()].sort((a,b)=>Number(a.questionIndex)-Number(b.questionIndex));
 }
@@ -728,32 +730,36 @@ async function calculateResults(){
   const voiceMetrics=computeVoiceSessionMetrics(validA,validB);
   supplemental.ai=await ensureAiTalkAnalyses(s.sessionId,supplemental,skippedQuestionIndexes);
   const aiRows=supplemental.ai.filter(x=>!skippedQuestionIndexes.includes(Number(x.questionIndex)));
-  const aiTalkBonus=clamp(aiRows.reduce((sum,x)=>sum+Number(x.bonus||x.analysis?.bonus||0),0),0,CONFIG.experienceScore.aiTalkBonusMax);
+  const validAiRows=aiRows.filter(x=>x?.ok===true&&x?.analysis);
+  const failedAiRows=aiRows.filter(x=>x?.ok===false);
+  const aiTalkBonus=clamp(validAiRows.reduce((sum,x)=>sum+Number(x.bonus||x.analysis?.bonus||0),0),0,CONFIG.experienceScore.aiTalkBonusMax);
+  const aiTalkStatus=validAiRows.length>=expectedQuestions?'READY':validAiRows.length>0?'PARTIAL':'UNAVAILABLE';
+  const aiTalkFailureReason=failedAiRows.map(x=>x.errorCode||x.errorMessage).filter(Boolean).slice(0,2).join(' / ');
   const heartScore=result.session.neoScore,voiceScore=voiceMetrics.valid?voiceMetrics.voiceScore:null;
   const baseScore=Number.isFinite(heartScore)&&Number.isFinite(voiceScore)
     ?CONFIG.experienceScore.heartWeight*heartScore+CONFIG.experienceScore.voiceWeight*voiceScore
     :heartScore;
   const finalScore=Number.isFinite(baseScore)?clamp(baseScore+aiTalkBonus,0,100):null;
   const most=result.perQuestion.filter(x=>!x.skipped&&Number.isFinite(x.pairQResponse)).sort((x,y)=>y.pairQResponse-x.pairQResponse)[0];
-  const aiTalkSummary=aiRows.map(x=>x.analysis?.summary).filter(Boolean).slice(0,2).join(' / ');
+  const aiTalkSummary=validAiRows.map(x=>x.analysis?.summary).filter(Boolean).slice(0,2).join(' / ');
   const highlights=[];
   if(Number.isFinite(voiceMetrics.turnTaking))highlights.push(`会話交代 ${Math.round(voiceMetrics.turnTaking)}点`);
   if(Number.isFinite(voiceMetrics.speechBalance))highlights.push(`発話バランス ${Math.round(voiceMetrics.speechBalance)}点`);
   if(Number.isFinite(result.session.balance))highlights.push(`心拍Balance ${Math.round(result.session.balance)}点`);
   if(aiTalkSummary)highlights.push(aiTalkSummary);
-  let aiComment=null;
+  let aiComment=null,aiCommentFallback=false,aiCommentRejectionReason=null;
   try{
     const generated=await generateResultComment({heartScore,voiceScore,aiTalkBonus,finalScore,highlights,variationSeed:Math.floor(Math.random()*1000000)});
-    aiComment=generated?.comment||null;
+    aiComment=generated?.comment||null;aiCommentFallback=!!generated?.fallback;aiCommentRejectionReason=generated?.rejectionReason||null;
   }catch(e){console.warn('AI result comment failed',e);}
   const display={
     neoScore:finalScore,heartScore,voiceScore,aiTalkBonus,rank:Number.isFinite(finalScore)?scoreRank(finalScore):null,
     radar:result.session.radar,scoreBreakdown:result.session.displayBreakdown,voiceMetrics,
-    mostReactiveQuestion:most?.question?.questionText||null,comment:reactionComment(result.session),aiComment:aiComment||reactionComment(result.session),aiTalkSummary,
+    mostReactiveQuestion:most?.question?.questionText||null,comment:reactionComment(result.session),aiComment:aiComment||reactionComment(result.session),aiCommentFallback,aiCommentRejectionReason,aiTalkSummary,aiTalkStatus,aiTalkFailureReason,
     miniTimeline:buildMiniTimeline(result.cleanA,result.cleanB),
   };
   await backend.updateSession(s.sessionId,{stage:'RESULT',status:SESSION_STATUS.COMPLETE,metrics:result.session,questionMetrics:result.perQuestion,quality:result.quality,voiceMetrics,aiTalkAnalysis:aiRows,displayResult:display,completedAt:now()});
-  await backend.appendAuditLog(s.sessionId,{eventType:'RESULT_CALCULATED',details:{quality:result.quality?.label,heartScore,voiceScore,aiTalkBonus,finalScore,skippedQuestionIndexes}});
+  await backend.appendAuditLog(s.sessionId,{eventType:'RESULT_CALCULATED',details:{quality:result.quality?.label,heartScore,voiceScore,aiTalkBonus,aiTalkStatus,aiCommentFallback,finalScore,skippedQuestionIndexes}});
 }
 
 function reactionComment(m){
@@ -842,7 +848,7 @@ async function recordsVoiceTab(s){
     backend.loadVoiceFeatures(s.sessionId,'A'),backend.loadVoiceFeatures(s.sessionId,'B'),backend.loadVoiceBaseline(s.sessionId,'A'),backend.loadVoiceBaseline(s.sessionId,'B'),backend.loadAiTranscripts(s.sessionId),backend.loadAiAnalyses(s.sessionId)
   ]);
   const vm=s.voiceMetrics||s.displayResult?.voiceMetrics||{};
-  const bonus=clamp(aiTalk.reduce((sum,x)=>sum+Number(x?.bonus||x?.analysis?.bonus||0),0),0,CONFIG.experienceScore.aiTalkBonusMax);
+  const validTalk=aiTalk.filter(x=>x?.ok===true&&x?.analysis);const failedTalk=aiTalk.filter(x=>x?.ok===false);const bonus=clamp(validTalk.reduce((sum,x)=>sum+Number(x?.bonus||x?.analysis?.bonus||0),0),0,CONFIG.experienceScore.aiTalkBonusMax);
   const byQ=(rows)=>new Map((rows||[]).map(x=>[Number(x.questionIndex),x]));
   const A=byQ(voiceA),B=byQ(voiceB),AI=byQ(aiTalk);
   const TR=new Map();for(const t of aiTranscripts||[]){const q=Number(t.questionIndex);const row=TR.get(q)||{};row[t.side]=t;TR.set(q,row);}
@@ -880,7 +886,7 @@ async function recordsVoiceTab(s){
       </tbody></table></div>
       <div class="grid4" style="margin-top:14px"><div class="kpi"><small>会話交代回数</small><strong>${combined.turnCount??'—'}</strong></div><div class="kpi"><small>同時発話率</small><strong>${pct(combined.overlapRatio)}</strong></div><div class="kpi"><small>UNKNOWN率</small><strong>${pct(combined.unknownRatio)}</strong></div><div class="kpi"><small>AI TALK BONUS</small><strong>${Number.isFinite(Number(ai?.bonus))?'+'+Number(ai.bonus):'—'}</strong></div></div>
       <div class="dual-transcript" style="margin-top:14px"><div class="callout info"><b>A側マイク文字起こし</b><br>${esc(tr.A?.transcript||'（なし）')}</div><div class="callout info"><b>B側マイク文字起こし</b><br>${esc(tr.B?.transcript||'（なし）')}</div></div>
-      ${ai?`<div class="callout" style="margin-top:10px"><b>AI会話分析：</b>${esc(an.summary||'分析結果なし')}<br><span class="mini">質問への関与 ${score(an.questionEngagement)} / 相互応答 ${score(an.mutualResponse)} / 自己開示 ${score(an.selfDisclosure)} / 感情表現 ${score(an.emotionalExpression)} / 会話の豊かさ ${score(an.conversationalRichness)}</span>${Array.isArray(an.evidence)&&an.evidence.length?`<br><span class="mini">根拠：${an.evidence.map(esc).join(' ／ ')}</span>`:''}</div>`:'<div class="callout" style="margin-top:10px">AI会話分析は未保存、またはA/B両方の文字起こしが揃っていません。</div>'}
+      ${ai?.ok===true?`<div class="callout" style="margin-top:10px"><b>AI会話分析：</b>${esc(an.summary||'特徴量のみ有効（要約なし）')}<br><span class="mini">質問への関与 ${score(an.questionEngagement)} / 相互応答 ${score(an.mutualResponse)} / 自己開示 ${score(an.selfDisclosure)} / 感情表現 ${score(an.emotionalExpression)} / 会話の豊かさ ${score(an.conversationalRichness)}</span>${Array.isArray(an.evidence)&&an.evidence.length?`<br><span class="mini">根拠：${an.evidence.map(esc).join(' ／ ')}</span>`:''}</div>`:ai?.ok===false?`<div class="callout danger" style="margin-top:10px"><b>AI会話分析：採用しませんでした</b><br><span class="mini">${esc(ai.errorCode||'AI_OUTPUT_INVALID')}：${esc(ai.errorMessage||'ローカルAIの出力品質が基準を満たしませんでした。')}。この質問のAI BONUSは0点です。</span></div>`:'<div class="callout" style="margin-top:10px">AI会話分析は未保存、またはA/B両方の文字起こしが揃っていません。</div>'}
       <details style="margin-top:14px"><summary>A / B / BOTH / UNKNOWN / SILENCE の話者判定を表示</summary>${speakerRows(a,b)}</details>
       <details style="margin-top:14px"><summary>200msごとの元音声特徴データを表示</summary>${frameRows(a,b)}</details>
     </section>`;
@@ -890,7 +896,7 @@ async function recordsVoiceTab(s){
     <div class="callout info" style="margin-bottom:18px"><b>「声が元々高い＝高反応」にはしません。</b><br>Pitch Responseは各自の10秒基準声に対するΔHz・Δ%・centsを保存し、主判定は本人内の相対変化率です。UP / DOWN / SAMEは方向として別保存し、UPだから高得点という扱いもしません。</div>
     <div class="callout info" style="margin-bottom:18px"><b>話者判定：</b>片耳マイク2本の時系列を共通時間軸で比較し、A / B / BOTH / UNKNOWN / SILENCE の5種類で保存・表示します。判別が曖昧な音はUNKNOWNのまま残します。</div>
     <div class="grid5"><div class="kpi"><small>VOICE SCORE β</small><strong>${score(vm.voiceScore)}</strong></div><div class="kpi"><small>Pitch Response</small><strong>${score(vm.pitchResponse)}</strong></div><div class="kpi"><small>Expressiveness</small><strong>${score(vm.expressiveness)}</strong></div><div class="kpi"><small>Speech Balance</small><strong>${score(vm.speechBalance)}</strong></div><div class="kpi"><small>Turn Taking</small><strong>${score(vm.turnTaking)}</strong></div></div>
-    <div class="callout info" style="margin-top:18px"><b>AI TALK BONUS 合計：+${bonus} / ${CONFIG.experienceScore.aiTalkBonusMax}</b><br>A/Bそれぞれの口元マイク音声を各PC内のローカルAIで別々に文字起こしし、その2本を操作PC内のローカルAIで合わせて会話特徴だけを補助評価します。AIは親密さ・恋愛感情を直接判定しません。生音声ファイルは研究DBには保存せず、特徴量・文字起こし・AI結果を保存します。</div>${questionBlocks||'<p class="subtitle" style="margin-top:18px">このセッションには音声記録がありません。</p>'}`;
+    <div class="callout info" style="margin-top:18px"><b>AI TALK BONUS 合計：+${bonus} / ${CONFIG.experienceScore.aiTalkBonusMax}</b><br>有効分析 ${validTalk.length}件 / 採用不可 ${failedTalk.length}件。A/Bそれぞれの口元マイク音声を各PC内のローカルAIで別々に文字起こしし、その2本を操作PC内のローカルAIで合わせて会話特徴だけを補助評価します。品質基準を満たさないAI出力は採点に使いません。生音声ファイルは研究DBには保存しません。</div>${questionBlocks||'<p class="subtitle" style="margin-top:18px">このセッションには音声記録がありません。</p>'}`;
 }
 
 function splitByGap(arr,gap=CONFIG.graphGapMs){const chunks=[];let cur=[];for(const p of arr){if(cur.length&&p.sessionElapsedMs-cur.at(-1).sessionElapsedMs>gap){chunks.push(cur);cur=[];}cur.push(p);}if(cur.length)chunks.push(cur);return chunks;}
