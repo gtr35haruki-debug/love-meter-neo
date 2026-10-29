@@ -19,7 +19,15 @@ async function ensureAuth(){
     const off=onAuthStateChanged(auth,user=>finish(user||null));setTimeout(()=>finish(null),1500);
   });
   if(existing) return existing;
-  return (await signInAnonymously(auth)).user;
+  try{
+    return (await signInAnonymously(auth)).user;
+  }catch(e){
+    const code=String(e?.code||'');
+    if(code.includes('operation-not-allowed')){
+      throw new Error('Firebase匿名認証が無効です。Firebase Console → Security → Authentication → Sign-in method → Anonymous を有効にしてください。');
+    }
+    throw new Error(`Firebase匿名認証に失敗しました: ${code||e?.message||e}`);
+  }
 }
 const user=await ensureAuth();const uid=user.uid;
 
