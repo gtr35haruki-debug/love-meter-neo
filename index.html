@@ -4,11 +4,11 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <meta name="theme-color" content="#070a14"/>
-<title>LOVE METER NEO v0.4.0 beta.5 LOCAL AI</title>
-<link rel="stylesheet" href="./styles.css?v=0.4.0b5h3"/>
+<title>LOVE METER NEO v0.4.0 beta.5 LOCAL AI - HOTFIX4</title>
+<link rel="stylesheet" href="./styles.css?v=0.4.0b5h4"/>
 </head>
 <body>
-<div id="app"><div id="boot-status" style="padding:28px;color:#d7def7;font-family:system-ui,sans-serif">LOVE METER NEO を起動診断しています…</div></div>
+<div id="app"><div id="boot-status" style="padding:28px;color:#d7def7;font-family:system-ui,sans-serif">app.js の正確な構文エラー位置を診断しています…</div></div>
 <script>
 (()=>{
   const esc=(v)=>String(v??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
@@ -20,47 +20,19 @@
   window.__lmShowBootError=(value,meta={})=>{
     const msg=String(value?.message||value?.reason?.message||value?.reason||value||'Unknown startup error');
     const stack=String(value?.stack||value?.reason?.stack||'');
-    const details=[meta.module?`Module: ${meta.module}`:'',meta.filename?`File: ${meta.filename}`:'',meta.lineno?`Line: ${meta.lineno}${meta.colno?` / Column: ${meta.colno}`:''}`:'',stack?`Stack:\n${stack}`:''].filter(Boolean).join('\n\n');
-    render('起動エラー',msg,details);
+    const details=[
+      meta.filename?`File: ${meta.filename}`:'',
+      meta.lineno?`Line: ${meta.lineno}${meta.colno?` / Column: ${meta.colno}`:''}`:'',
+      stack?`Stack:\n${stack}`:''
+    ].filter(Boolean).join('\n\n');
+    render('起動エラー',msg,details||'位置情報が取得できませんでした。');
   };
-  window.addEventListener('error',e=>window.__lmShowBootError(e.error||e.message,{filename:e.filename,lineno:e.lineno,colno:e.colno}));
+  window.addEventListener('error',e=>{
+    window.__lmShowBootError(e.error||e.message,{filename:e.filename,lineno:e.lineno,colno:e.colno});
+  },true);
   window.addEventListener('unhandledrejection',e=>window.__lmShowBootError(e.reason));
 })();
 </script>
-<script type="module">
-const modules=[
-  './src/config.js?v=0.4.0b5h3',
-  './src/protocols.js?v=0.4.0b5h3',
-  './src/question-bank.js?v=0.4.0b5h3',
-  './src/survey-schema.js?v=0.4.0b5h3',
-  './src/metrics.js?v=0.4.0b5h3',
-  './src/voice.js?v=0.4.0b5h3',
-  './src/ai.js?v=0.4.0b5h3',
-  './src/radar.js?v=0.4.0b5h3',
-  './src/research-export.js?v=0.4.0b5h3',
-  './src/admin-gate.js?v=0.4.0b5h3',
-  './src/bluetooth-hw9.js?v=0.4.0b5h3',
-  './src/idb.js?v=0.4.0b5h3',
-  './src/local-backend.js?v=0.4.0b5h3',
-  './src/firebase-backend.js?v=0.4.0b5h3',
-  './src/backend.js?v=0.4.0b5h3'
-];
-const status=document.getElementById('boot-status');
-for(const mod of modules){
-  try{
-    if(status)status.textContent=`起動診断中: ${mod}`;
-    await import(mod);
-  }catch(err){
-    window.__lmShowBootError?.(err,{module:mod});
-    throw err;
-  }
-}
-try{
-  if(status)status.textContent='起動診断完了。app.js を起動しています…';
-  await import('./src/app.js?v=0.4.0b5h3');
-}catch(err){
-  window.__lmShowBootError?.(err,{module:'./src/app.js?v=0.4.0b5h3'});
-}
-</script>
+<script type="module" src="./src/app.js?v=0.4.0b5h4"></script>
 </body>
 </html>
