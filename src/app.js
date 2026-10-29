@@ -481,8 +481,7 @@ async function measureVoiceBaseline(){
   const side=roleSide(),vc=state.voiceCapture;if(!side||!vc||state.voiceStatus!=='READY'||state.voiceBaselineBusy)return;
   await refreshSession();
   const latest=state.session||{};
-  if(side==='B'&&!latest.voiceBaselineReady?.A){alert('基準声は A → B の順で測定します。
-先に参加者Aの10秒基準声を測定してください。');return;}
+  if(side==='B'&&!latest.voiceBaselineReady?.A){alert('基準声は A → B の順で測定します。\n先に参加者Aの10秒基準声を測定してください。');return;}
   const prompt=CONFIG.voice.baselinePrompt||'今日ここに来るまで、何をしていましたか？';
   if(!confirm(`参加者${side}の基準声を10秒測定します。
 
