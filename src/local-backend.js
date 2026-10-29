@@ -1,4 +1,4 @@
-import { putSession, getSession, listSessions, putHr, getHr, putSurvey, getSurvey } from './idb.js?v=0.4.0b1';
+import { putSession, getSession, listSessions, putHr, getHr, putSurvey, getSurvey } from './idb.js?v=0.4.0b4';
 
 const CHANNEL='love-meter-neo-sync';
 const bc=('BroadcastChannel' in window)?new BroadcastChannel(CHANNEL):null;
@@ -39,6 +39,8 @@ export async function joinByCode(code){const id=localStorage.getItem(sessionKey(
 export async function setPresence(sessionId,role,present=true){const s=await loadSession(sessionId);return updateSession(sessionId,{devicePresence:{...(s?.devicePresence||{}),[role]:present?Date.now():null}});}
 export async function setSensorReady(sessionId,side,ready){const s=await loadSession(sessionId);return updateSession(sessionId,{sensorReady:{...(s?.sensorReady||{}),[side]:!!ready}});}
 export async function setMicReady(sessionId,side,ready){const s=await loadSession(sessionId);return updateSession(sessionId,{micReady:{...(s?.micReady||{}),[side]:!!ready}});}
+export async function setMicProfile(sessionId,side,profile){const s=await loadSession(sessionId);return updateSession(sessionId,{micProfile:{...(s?.micProfile||{}),[side]:profile||null}});}
+export async function setVoiceBaselineReady(sessionId,side,ready){const s=await loadSession(sessionId);return updateSession(sessionId,{voiceBaselineReady:{...(s?.voiceBaselineReady||{}),[side]:!!ready}});}
 export async function setSurveyStatus(sessionId,key,value=true){const s=await loadSession(sessionId);return updateSession(sessionId,{surveyStatus:{...(s?.surveyStatus||{}),[key]:!!value}});}
 export async function saveHr(sample){await putHr(sample);emit({type:'hr',sessionId:sample.sessionId,side:sample.side});}
 export async function loadHr(sessionId,side){return getHr(sessionId,side);}
@@ -49,6 +51,14 @@ export async function saveVoiceFeature(sessionId,side,questionIndex,data){
 }
 export async function loadVoiceFeatures(sessionId,side){
   const rows=JSON.parse(localStorage.getItem(`lmneo:voice:${sessionId}:${side}`)||'{}');return Object.values(rows).sort((a,b)=>Number(a.questionIndex)-Number(b.questionIndex));
+}
+export async function saveVoiceBaseline(sessionId,side,data){localStorage.setItem(`lmneo:voicebaseline:${sessionId}:${side}`,JSON.stringify({...data,side,savedAt:Date.now()}));const s=await loadSession(sessionId);await updateSession(sessionId,{voiceBaselineReady:{...(s?.voiceBaselineReady||{}),[side]:!!data?.quality?.valid}});emit({type:'voice-baseline',sessionId,side});}
+export async function loadVoiceBaseline(sessionId,side){const raw=localStorage.getItem(`lmneo:voicebaseline:${sessionId}:${side}`);return raw?JSON.parse(raw):null;}
+export async function saveAiTranscript(sessionId,questionIndex,side,data){
+  const key=`lmneo:aitranscript:${sessionId}`;const rows=JSON.parse(localStorage.getItem(key)||'{}');rows[questionIndex]=rows[questionIndex]||{};rows[questionIndex][side]={...data,questionIndex,side,savedAt:Date.now()};localStorage.setItem(key,JSON.stringify(rows));emit({type:'ai-transcript',sessionId,side,questionIndex});
+}
+export async function loadAiTranscripts(sessionId){
+  const rows=JSON.parse(localStorage.getItem(`lmneo:aitranscript:${sessionId}`)||'{}');const out=[];for(const [q,row] of Object.entries(rows))for(const side of ['A','B'])if(row?.[side])out.push({...row[side],questionIndex:Number(q),side});return out.sort((a,b)=>Number(a.questionIndex)-Number(b.questionIndex)||String(a.side).localeCompare(String(b.side)));
 }
 export async function saveAiAnalysis(sessionId,questionIndex,data){
   const key=`lmneo:ai:${sessionId}`;const rows=JSON.parse(localStorage.getItem(key)||'{}');rows[questionIndex]={...data,questionIndex,savedAt:Date.now()};localStorage.setItem(key,JSON.stringify(rows));emit({type:'ai',sessionId,questionIndex});
@@ -78,6 +88,6 @@ export async function loadExportBundle(sessionId,{includeSurveys=true}={}){
     A:{pre:await getSurvey(sessionId,'A','pre'),post:await getSurvey(sessionId,'A','post')},
     B:{pre:await getSurvey(sessionId,'B','pre'),post:await getSurvey(sessionId,'B','post')}
   }:{};
-  const [voiceA,voiceB,aiTalk]=await Promise.all([loadVoiceFeatures(sessionId,'A'),loadVoiceFeatures(sessionId,'B'),loadAiAnalyses(sessionId)]);
-  return {session,rawA,rawB,auditLogs,surveys,voiceA,voiceB,aiTalk};
+  const [voiceA,voiceB,voiceBaselineA,voiceBaselineB,aiTranscripts,aiTalk]=await Promise.all([loadVoiceFeatures(sessionId,'A'),loadVoiceFeatures(sessionId,'B'),loadVoiceBaseline(sessionId,'A'),loadVoiceBaseline(sessionId,'B'),loadAiTranscripts(sessionId),loadAiAnalyses(sessionId)]);
+  return {session,rawA,rawB,auditLogs,surveys,voiceA,voiceB,voiceBaselineA,voiceBaselineB,aiTranscripts,aiTalk};
 }

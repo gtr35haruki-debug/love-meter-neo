@@ -1,4 +1,4 @@
-export const APP_VERSION = '0.4.0-beta.1';
+export const APP_VERSION = '0.4.0-beta.4';
 export const QUESTION_BANK_VERSION = 'QUESTION_BANK_V1';
 export const EVENT_QUESTION_BANK_VERSION = 'QUESTION_BANK_EVENT_V3';
 export const CHILD_SUPPORT_VERSION = 'CHILD_SUPPORT_V1';
@@ -7,8 +7,8 @@ export const CONSENT_VERSION = 'CONSENT_V2_AUDIO_AI';
 export const PREPROCESSING_VERSION = 'PREPROCESSING_V1_1_PILOT';
 export const METRICS_VERSION = 'METRICS_V1_1_PILOT';
 export const DISPLAY_SCORE_VERSION = 'DISPLAY_SCORE_V3_PILOT';
-export const VOICE_METRICS_VERSION = 'VOICE_METRICS_V0_1_BETA';
-export const AI_TALK_VERSION = 'AI_TALK_BONUS_V0_1_BETA';
+export const VOICE_METRICS_VERSION = 'VOICE_METRICS_V0_3_DUAL_MIC_SPEAKER_BETA';
+export const AI_TALK_VERSION = 'AI_TALK_BONUS_V0_2_DUAL_TRANSCRIPT_BETA';
 export const DISPLAY_SCALE_VERSION = 'DISPLAY_SCALE_PILOT_20260824_V1';
 
 export const CONFIG = {
@@ -81,6 +81,19 @@ export const CONFIG = {
     rmsCvHigh: 0.75,
     turnsForFullScore: 8,
     overlapPenaltyAt: 0.45,
+    baselineDurationMs: 10000,
+    baselineMinSpeechRatio: 0.30,
+    baselineMinVoicedFrames: 18,
+    pitchRelativeHighPct: 12,
+    pitchSameBandPct: 2,
+    expressivenessPitchDeltaHigh: 0.18,
+    expressivenessRmsDeltaHigh: 0.40,
+    speakerSameVoicePitchPct: 0.05,
+    speakerDominanceRatio: 1.50,
+    speakerLeakageDominanceRatio: 1.15,
+    speakerUnknownPenaltyAt: 0.30,
+    latencyCorrectionMaxMs: 500,
+    baselinePrompt: '今日ここに来るまで、何をしていましたか？',
   },
   experienceScore: {
     heartWeight: 0.70,
@@ -89,8 +102,8 @@ export const CONFIG = {
   },
   ai: {
     enabled: true,
-    analysisSide: 'A',
     maxAudioBytes: 4 * 1024 * 1024,
+    requireBothTranscriptsForBonus: true,
   },
   firebase: {
     apiKey: 'AIzaSyByFvnkQIbnz2XbZMQOABmGUFa7MyvsiMg',

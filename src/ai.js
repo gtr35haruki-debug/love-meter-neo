@@ -1,4 +1,4 @@
-import { CONFIG } from './config.js?v=0.4.0b1';
+import { CONFIG } from './config.js?v=0.4.0b4';
 
 const SDK='12.17.1';
 let _fns=null;
@@ -20,14 +20,26 @@ async function blobToBase64(blob){
   return btoa(binary);
 }
 
-export async function analyzeConversationAudio({blob,sessionId,questionIndex,questionText}){
+export async function transcribeParticipantAudio({blob,sessionId,questionIndex,questionText,side}){
   if(!CONFIG.ai.enabled||!blob?.size)return null;
   if(blob.size>CONFIG.ai.maxAudioBytes)throw new Error('音声データが上限を超えました。');
   if(CONFIG.backendMode==='local')return null;
-  const f=await getFns();const fn=f.httpsCallable(f.getFunctions(f.app),'analyzeConversation');
+  const f=await getFns();const fn=f.httpsCallable(f.getFunctions(f.app),'transcribeParticipantAudio');
   const audioBase64=await blobToBase64(blob);
-  const res=await fn({audioBase64,mimeType:blob.type||'audio/webm',sessionId,questionIndex,questionText});
+  const res=await fn({audioBase64,mimeType:blob.type||'audio/webm',sessionId,questionIndex,questionText,side});
   return res.data||null;
+}
+
+export async function analyzeConversationTranscripts({sessionId,questionIndex,questionText,transcriptA,transcriptB}){
+  if(!CONFIG.ai.enabled||CONFIG.backendMode==='local')return null;
+  const f=await getFns();const fn=f.httpsCallable(f.getFunctions(f.app),'analyzeConversationTranscripts');
+  const res=await fn({sessionId,questionIndex,questionText,transcriptA,transcriptB});
+  return res.data||null;
+}
+
+// Backward-compatible helper for older beta data/tools.
+export async function analyzeConversationAudio({blob,sessionId,questionIndex,questionText,side='A'}){
+  return transcribeParticipantAudio({blob,sessionId,questionIndex,questionText,side});
 }
 
 export async function generateResultComment(payload){

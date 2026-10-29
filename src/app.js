@@ -2,21 +2,21 @@ import {
   APP_VERSION, CONFIG, ROLE, SESSION_STATUS, QUESTION_BANK_VERSION, EVENT_QUESTION_BANK_VERSION,
   CHILD_SUPPORT_VERSION, EVENT_GUIDE_VERSION, CONSENT_VERSION,
   PREPROCESSING_VERSION, METRICS_VERSION, DISPLAY_SCORE_VERSION, DISPLAY_SCALE_VERSION, VOICE_METRICS_VERSION, AI_TALK_VERSION
-} from './config.js?v=0.4.0b1';
-import { getQuestionBankForProtocol, getQuestionCategoriesForProtocol, childReadAloudPrompt } from './question-bank.js?v=0.4.0b1';
-import { PROTOCOLS, SET_ORDERS, buildTimeline, getPhaseAtElapsed, isEventProtocol } from './protocols.js?v=0.4.0b1';
+} from './config.js?v=0.4.0b4';
+import { getQuestionBankForProtocol, getQuestionCategoriesForProtocol, childReadAloudPrompt } from './question-bank.js?v=0.4.0b4';
+import { PROTOCOLS, SET_ORDERS, buildTimeline, getPhaseAtElapsed, isEventProtocol } from './protocols.js?v=0.4.0b4';
 import {
   RELATIONSHIP_OPTIONS, PRE_RELATIONSHIP_ITEMS, PRE_STATE_ITEMS, OPTIONAL_ITEM,
   CONDITION_OPTIONS, POST_ITEMS, CONSENT_TEXT
-} from './survey-schema.js?v=0.4.0b1';
-import * as backend from './backend.js?v=0.4.0b1';
-import { HeartRateSensor, DemoHeartRateSensor } from './bluetooth-hw9.js?v=0.4.0b1';
-import { computeSessionMetrics } from './metrics.js?v=0.4.0b1';
-import { VoiceCapture, computeVoiceSessionMetrics } from './voice.js?v=0.4.0b1';
-import { analyzeConversationAudio, generateResultComment } from './ai.js?v=0.4.0b1';
-import { buildExportFiles, zipFile, redact } from './research-export.js?v=0.4.0b1';
-import { radarSvg } from './radar.js?v=0.4.0b1';
-import { isRecordsUnlocked, verifyRecordsPin, lockRecords, touchRecordsActivity } from './admin-gate.js?v=0.4.0b1';
+} from './survey-schema.js?v=0.4.0b4';
+import * as backend from './backend.js?v=0.4.0b4';
+import { HeartRateSensor, DemoHeartRateSensor } from './bluetooth-hw9.js?v=0.4.0b4';
+import { computeSessionMetrics } from './metrics.js?v=0.4.0b4';
+import { VoiceCapture, computeVoiceSessionMetrics, classifySpeakerTimeline, summarizeSpeakerTimeline, listAudioInputDevices } from './voice.js?v=0.4.0b4';
+import { transcribeParticipantAudio, analyzeConversationTranscripts, generateResultComment } from './ai.js?v=0.4.0b4';
+import { buildExportFiles, zipFile, redact } from './research-export.js?v=0.4.0b4';
+import { radarSvg } from './radar.js?v=0.4.0b4';
+import { isRecordsUnlocked, verifyRecordsPin, lockRecords, touchRecordsActivity } from './admin-gate.js?v=0.4.0b4';
 
 const app=document.querySelector('#app');
 const state={
@@ -31,6 +31,13 @@ const state={
   voiceCapture:null,
   voiceStatus:'DISCONNECTED',
   voiceThreshold:null,
+  voiceBaseline:null,
+  voiceBaselineBusy:false,
+  voiceBaselineRemainingMs:null,
+  micMeta:null,
+  micConnectionType:'UNKNOWN',
+  micDevices:[],
+  micDeviceId:'',
   voiceProcessing:0,
   voiceTransitionBusy:false,
   bpm:null,
@@ -74,7 +81,7 @@ const ROLE_LABELS={DISPLAY:'表示端末 (DISPLAY)',SENSOR_A:'計測端末A (SEN
 const PHASE_LABELS={BASELINE:'基準計測 (BASELINE)',QUESTION:'質問 (QUESTION)',RESET:'休憩 (RESET)',RECOVERY:'回復計測 (RECOVERY)'};
 const EVENT_LABELS={
   QUESTION_SKIPPED:'質問スキップ (QUESTION_SKIPPED)',
-  SESSION_CREATED:'セッション作成 (SESSION_CREATED)',DEVICE_JOINED:'端末参加 (DEVICE_JOINED)',HW9_CONNECTED:'心拍計接続 (HW9_CONNECTED)',DEMO_SENSOR_CONNECTED:'デモ心拍計接続 (DEMO_SENSOR_CONNECTED)',HEART_RATE_STREAM_READY:'心拍受信準備完了 (HEART_RATE_STREAM_READY)',SURVEY_SUBMITTED:'アンケート送信 (SURVEY_SUBMITTED)',ACCLIMATION_STARTED:'順応開始 (ACCLIMATION_STARTED)',MEASUREMENT_SCHEDULED:'測定開始予約 (MEASUREMENT_SCHEDULED)',PAUSED:'一時停止 (PAUSED)',RESUMED:'再開 (RESUMED)',MEASUREMENT_ENDED:'測定終了 (MEASUREMENT_ENDED)',RESULT_CALCULATED:'結果計算 (RESULT_CALCULATED)',CONTROLLER_TRANSFER:'操作端末変更 (CONTROLLER_TRANSFER)'
+  SESSION_CREATED:'セッション作成 (SESSION_CREATED)',DEVICE_JOINED:'端末参加 (DEVICE_JOINED)',HW9_CONNECTED:'心拍計接続 (HW9_CONNECTED)',DEMO_SENSOR_CONNECTED:'デモ心拍計接続 (DEMO_SENSOR_CONNECTED)',HEART_RATE_STREAM_READY:'心拍受信準備完了 (HEART_RATE_STREAM_READY)',MIC_READY:'マイク準備完了 (MIC_READY)',VOICE_BASELINE_READY:'基準声取得 (VOICE_BASELINE_READY)',AI_TRANSCRIPTION_FAILED:'AI文字起こし失敗 (AI_TRANSCRIPTION_FAILED)',AI_TALK_FAILED:'AI会話分析失敗 (AI_TALK_FAILED)',SURVEY_SUBMITTED:'アンケート送信 (SURVEY_SUBMITTED)',ACCLIMATION_STARTED:'順応開始 (ACCLIMATION_STARTED)',MEASUREMENT_SCHEDULED:'測定開始予約 (MEASUREMENT_SCHEDULED)',PAUSED:'一時停止 (PAUSED)',RESUMED:'再開 (RESUMED)',MEASUREMENT_ENDED:'測定終了 (MEASUREMENT_ENDED)',RESULT_CALCULATED:'結果計算 (RESULT_CALCULATED)',CONTROLLER_TRANSFER:'操作端末変更 (CONTROLLER_TRANSFER)'
 };
 const REASON_LABELS={INSUFFICIENT_VALID_DATA:'有効データ不足 (INSUFFICIENT_VALID_DATA)',LOW_ACTIVITY:'反応量不足 (LOW_ACTIVITY)',CONTINUOUS_GAP:'連続欠測 (CONTINUOUS_GAP)',NO_VARIANCE:'変動不足 (NO_VARIANCE)',NO_REACTION:'反応量不足 (NO_REACTION)',MISSING_MAGNITUDE:'反応量データ不足 (MISSING_MAGNITUDE)',LOCAL_BASELINE_INVALID:'直前基準データ不足 (LOCAL_BASELINE_INVALID)',QUESTION_SKIPPED:'質問スキップ (QUESTION_SKIPPED)'};
 const CONDITION_LABELS=Object.fromEntries(CONDITION_OPTIONS.map(x=>[x.value,`${x.label} (${x.value})`]));
@@ -131,7 +138,7 @@ async function clearRole(){
   if(state.sessionId&&roleSide())try{await backend.setSensorReady(state.sessionId,roleSide(),false);await backend.setMicReady(state.sessionId,roleSide(),false);}catch{}
   stopTick();sessionStorage.removeItem('lmneo-role');sessionStorage.removeItem('lmneo-session');
   try{if(state.voiceCapture)await state.voiceCapture.disconnect();}catch{}
-  state.role=null;state.sessionId=null;state.session=null;state.sensor=null;state.sensorStatus='DISCONNECTED';state.sensorValidated=false;state.voiceCapture=null;state.voiceStatus='DISCONNECTED';state.voiceThreshold=null;state.surveyStage=null;state.surveyLocked=null;render();
+  state.role=null;state.sessionId=null;state.session=null;state.sensor=null;state.sensorStatus='DISCONNECTED';state.sensorValidated=false;state.voiceCapture=null;state.voiceStatus='DISCONNECTED';state.voiceThreshold=null;state.voiceBaseline=null;state.voiceBaselineBusy=false;state.voiceBaselineRemainingMs=null;state.micMeta=null;state.micConnectionType='UNKNOWN';state.micDevices=[];state.micDeviceId='';state.surveyStage=null;state.surveyLocked=null;render();
 }
 
 function roleSelection(){
@@ -267,6 +274,8 @@ function getStartBlockers(s){
   if(state.voiceStatus!=='READY')blockers.push(`SENSOR ${side} でマイク準備が必要です`);
   if(!s.micReady?.A)blockers.push('Microphone A が READY ではありません');
   if(!s.micReady?.B)blockers.push('Microphone B が READY ではありません');
+  if(!s.voiceBaselineReady?.A)blockers.push('参加者Aの基準声が未測定です');
+  if(!s.voiceBaselineReady?.B)blockers.push('参加者Bの基準声が未測定です');
   if(!s.sensorReady?.A)blockers.push('Sensor A が READY ではありません');
   if(!s.sensorReady?.B)blockers.push('Sensor B が READY ではありません');
   if(s.protocolId==='RESEARCH_V1'){
@@ -323,8 +332,8 @@ function operatorScreen(){
       ${researchReadiness}
       ${readinessRow('Sensor A',!!s.sensorReady?.A,'実心拍を数秒受信してREADY')}
       ${readinessRow('Sensor B',!!s.sensorReady?.B,'実心拍を数秒受信してREADY')}
-      ${readinessRow('Microphone A',!!s.micReady?.A,'音声解析READY')}${readinessRow('Microphone B',!!s.micReady?.B,'音声解析READY')}
-      <div class="control-group"><div class="section-title">SENSOR ${side}</div><div class="grid2"><button class="btn" data-action="connect-hw9">HW9接続</button><button class="btn btn-quiet" data-action="connect-demo">DEMO HR</button></div><button class="btn full mic-btn ${state.voiceStatus==='READY'?'good':''}" data-action="connect-mic" ${state.voiceStatus==='READY'?'disabled':''}>${state.voiceStatus==='READY'?'マイク準備完了':'PCマイクを準備'}</button><div class="mini">音声は質問中のみ解析します。生音声ファイルはLOVE METER側には保存しません。</div>${preButton}</div>
+      ${readinessRow('Microphone A',!!s.micReady?.A,'音声解析READY')}${readinessRow('Voice Baseline A',!!s.voiceBaselineReady?.A,'本人基準声10秒')}${readinessRow('Microphone B',!!s.micReady?.B,'音声解析READY')}${readinessRow('Voice Baseline B',!!s.voiceBaselineReady?.B,'本人基準声10秒')}
+      <div class="control-group"><div class="section-title">SENSOR ${side}</div><div class="grid2"><button class="btn" data-action="connect-hw9">HW9接続</button><button class="btn btn-quiet" data-action="connect-demo">DEMO HR</button></div><label class="mini" style="display:block;margin-top:12px">マイク接続方式</label><select id="mic-connection-type" class="input" style="width:100%;margin:6px 0 10px"><option value="UNKNOWN" ${state.micConnectionType==='UNKNOWN'?'selected':''}>不明 / 自動判定</option><option value="WIRED" ${state.micConnectionType==='WIRED'?'selected':''}>有線イヤホン・マイク</option><option value="WIRELESS" ${state.micConnectionType==='WIRELESS'?'selected':''}>ワイヤレスイヤホン・マイク</option></select><label class="mini" style="display:block;margin-top:10px">使用するマイク</label><div class="grid2" style="align-items:end"><select id="mic-device-select" class="input" style="width:100%;margin:6px 0 10px"><option value="">既定のマイク</option>${state.micDevices.map((d,i)=>`<option value="${esc(d.deviceId)}" ${state.micDeviceId===d.deviceId?'selected':''}>${esc(d.label||`マイク ${i+1}`)}</option>`).join('')}</select><button class="btn btn-quiet" data-action="refresh-mics" style="margin-bottom:10px">マイク一覧更新</button></div><button class="btn full mic-btn ${state.voiceStatus==='READY'?'good':''}" data-action="connect-mic" ${state.voiceStatus==='READY'?'disabled':''}>${state.voiceStatus==='READY'?'マイク準備完了':'マイクを準備'}</button><button class="btn full ${s.voiceBaselineReady?.[side]?'good':''}" data-action="measure-voice-baseline" ${state.voiceStatus!=='READY'||state.voiceBaselineBusy?'disabled':''}>${state.voiceBaselineBusy?`基準声を測定中… ${Math.ceil((state.voiceBaselineRemainingMs||0)/1000)}秒`:s.voiceBaselineReady?.[side]?'基準声 10秒 測定済み':'基準声を10秒測定'}</button><div class="mini">A→Bの順で、相手は黙った状態で10秒測定します。基準用質問「今日ここに来るまで、何をしていましたか？」に自然な声で答えてください。基準F0・抑揚・音量を保存し、質問中は本人基準からの変化率で判定します。</div>${preButton}</div>
       ${s.stage==='SETUP'&&isController()?`<div class="control-group"><div class="section-title">PC1 参加説明</div><div class="intro-control"><button class="btn btn-quiet" data-action="intro-prev" ${Number(s.introPage||0)===0?'disabled':''}>←</button><span>${Number(s.introPage||0)+1} / 3</span><button class="btn btn-quiet" data-action="intro-next" ${Number(s.introPage||0)>=2?'disabled':''}>→</button></div></div>`:''}
       ${s.stage==='SETUP'?`<div class="control-group"><button class="btn primary full" data-action="start-acclim" ${canProceed?'':'disabled'}>${s.protocolId==='RESEARCH_V1'?'5分の順応を開始':'計測準備完了'}</button>${!canProceed?`<div class="blocker"><b>開始できない理由</b>${blockers.map(x=>`<span>• ${esc(x)}</span>`).join('')}</div>`:''}</div>`:''}
       ${s.stage==='ACCLIMATION'?`<div class="control-group"><div class="callout info">順応中 <b id="live-acclim">${fmt((s.readyAtMs||0)-now())}</b><br><small>装着直後・初期緊張の影響を減らすための時間です。</small></div></div>`:''}
@@ -408,27 +417,66 @@ async function connectSensor(demo=false){
   try{await state.sensor.connect();await backend.appendAuditLog(state.sessionId,{eventType:demo?'DEMO_SENSOR_CONNECTED':'HW9_CONNECTED',details:{side}});}
   catch(e){state.sensorStatus='ERROR';alert(`センサー接続に失敗しました。\n${e.message}`);render();}
 }
+async function refreshMicrophoneList(){
+  try{
+    state.micDevices=await listAudioInputDevices();
+    if(state.micDeviceId&&!state.micDevices.some(d=>d.deviceId===state.micDeviceId))state.micDeviceId='';
+    render();
+  }catch(e){alert(`マイク一覧を取得できませんでした。\n${e?.message||e}`);}
+}
+
 async function connectMicrophone(){
   const side=roleSide();if(!side)return;
   try{if(state.voiceCapture)await state.voiceCapture.disconnect();}catch{}
   state.voiceStatus='REQUESTING';render();
   state.voiceCapture=new VoiceCapture({onStatus:st=>{
-    state.voiceStatus=st.state; if(Number.isFinite(st.speechThreshold))state.voiceThreshold=st.speechThreshold;
+    state.voiceStatus=st.state; if(Number.isFinite(st.speechThreshold))state.voiceThreshold=st.speechThreshold;if(Number.isFinite(st.remainingMs))state.voiceBaselineRemainingMs=st.remainingMs;
     const el=document.querySelector('[data-action="connect-mic"]');if(el&&st.state==='READY'){el.textContent='マイク準備完了';el.disabled=true;el.classList.add('good');}
   }});
   try{
-    const cal=await state.voiceCapture.connect();state.voiceStatus='READY';state.voiceThreshold=cal.speechThreshold;await backend.setMicReady(state.sessionId,side,true);
-    await backend.appendAuditLog(state.sessionId,{eventType:'MIC_READY',details:{side,ambientRms:cal.ambientRms,speechThreshold:cal.speechThreshold}});render();
+    const selected=document.querySelector('#mic-connection-type')?.value||state.micConnectionType||'UNKNOWN';state.micConnectionType=selected;
+    const selectedDevice=document.querySelector('#mic-device-select')?.value||state.micDeviceId||'';state.micDeviceId=selectedDevice;
+    const cal=await state.voiceCapture.connect({connectionType:selected,deviceId:selectedDevice||null});state.voiceStatus='READY';state.voiceThreshold=cal.speechThreshold;state.micMeta=cal.deviceMeta;state.micConnectionType=selected==='UNKNOWN'?(cal.deviceMeta?.connectionType||'UNKNOWN'):selected;
+    const profile={...(cal.deviceMeta||{}),connectionType:state.micConnectionType,ambientRms:cal.ambientRms,speechThreshold:cal.speechThreshold,selectedDeviceLabel:cal.deviceMeta?.label||null,connectedAt:now()};await backend.setMicProfile(state.sessionId,side,profile);await backend.setMicReady(state.sessionId,side,true);await backend.setVoiceBaselineReady(state.sessionId,side,false);
+    await backend.appendAuditLog(state.sessionId,{eventType:'MIC_READY',details:{side,connectionType:state.micConnectionType,label:cal.deviceMeta?.label||'',ambientRms:cal.ambientRms,speechThreshold:cal.speechThreshold}});render();
   }catch(e){state.voiceStatus='ERROR';alert(`マイクの準備に失敗しました。\n${e?.message||e}`);render();}
 }
 
-async function processAiQuestion(captured,feature){
-  if(roleSide()!==CONFIG.ai.analysisSide||!captured?.blob?.size||feature.skipped)return;
+async function measureVoiceBaseline(){
+  const side=roleSide(),vc=state.voiceCapture;if(!side||!vc||state.voiceStatus!=='READY'||state.voiceBaselineBusy)return;
+  await refreshSession();
+  const latest=state.session||{};
+  if(side==='B'&&!latest.voiceBaselineReady?.A){alert('基準声は A → B の順で測定します。
+先に参加者Aの10秒基準声を測定してください。');return;}
+  const prompt=CONFIG.voice.baselinePrompt||'今日ここに来るまで、何をしていましたか？';
+  if(!confirm(`参加者${side}の基準声を10秒測定します。
+
+【基準用の質問】
+「${prompt}」
+
+参加者${side}だけが自然な声で話してください。相手はこの10秒間話さないでください。
+片耳イヤホンのマイクは口元の近くに固定します。
+準備ができたらOKを押してください。`))return;
+  state.voiceBaselineBusy=true;state.voiceBaselineRemainingMs=CONFIG.voice.baselineDurationMs;render();
+  try{
+    await backend.updateSession(state.sessionId,{voiceBaselineActiveSide:side});
+    const rec=await vc.captureBaseline(CONFIG.voice.baselineDurationMs);
+    if(!rec?.quality?.valid){alert('基準声を十分に取得できませんでした。
+10秒間、普段の声量で話し続けてもう一度測定してください。');return;}
+    const data={summary:rec.summary,frames:rec.frames,quality:rec.quality,durationMs:rec.durationMs,prompt,micMeta:{...(state.micMeta||rec.deviceMeta||{}),connectionType:state.micConnectionType},voiceMetricsVersion:VOICE_METRICS_VERSION,capturedAt:now()};
+    state.voiceBaseline=data;vc.setBaselineSummary(rec.summary);await backend.saveVoiceBaseline(state.sessionId,side,data);
+    await backend.appendAuditLog(state.sessionId,{eventType:'VOICE_BASELINE_READY',details:{side,durationMs:rec.durationMs,prompt,pitchMeanHz:rec.summary?.pitchMeanHz,pitchStdHz:rec.summary?.pitchStdHz,rmsMean:rec.summary?.rmsMean,speechRatio:rec.summary?.speechRatio,connectionType:state.micConnectionType}});await refreshSession();
+  }catch(e){alert(`基準声測定に失敗しました。
+${e?.message||e}`);}finally{await backend.updateSession(state.sessionId,{voiceBaselineActiveSide:null}).catch(()=>{});state.voiceBaselineBusy=false;state.voiceBaselineRemainingMs=null;state.voiceStatus='READY';render();}
+}
+
+async function processAiTranscript(captured,feature){
+  const side=roleSide();if(!side||!captured?.blob?.size||feature.skipped)return;
   state.voiceProcessing++;
   try{
-    const ai=await analyzeConversationAudio({blob:captured.blob,sessionId:state.sessionId,questionIndex:feature.questionIndex,questionText:feature.questionText});
-    if(ai)await backend.saveAiAnalysis(state.sessionId,feature.questionIndex,{...ai,questionText:feature.questionText});
-  }catch(e){console.warn('AI talk analysis failed',e);await backend.appendAuditLog(state.sessionId,{eventType:'AI_TALK_FAILED',details:{questionIndex:feature.questionIndex,message:String(e?.message||e).slice(0,160)}}).catch(()=>{});}
+    const tr=await transcribeParticipantAudio({blob:captured.blob,sessionId:state.sessionId,questionIndex:feature.questionIndex,questionText:feature.questionText,side});
+    if(tr)await backend.saveAiTranscript(state.sessionId,feature.questionIndex,side,{...tr,questionText:feature.questionText,micMeta:{...(state.micMeta||{}),connectionType:state.micConnectionType}});
+  }catch(e){console.warn('AI transcription failed',e);await backend.appendAuditLog(state.sessionId,{eventType:'AI_TRANSCRIPTION_FAILED',details:{side,questionIndex:feature.questionIndex,message:String(e?.message||e).slice(0,160)}}).catch(()=>{});}
   finally{state.voiceProcessing=Math.max(0,state.voiceProcessing-1);}
 }
 
@@ -445,14 +493,15 @@ async function syncVoiceCapture(phase){
       if(captured){
         const meta=captured.meta||{};
         const wasSkipped=!!state.session?.skippedQuestions?.[String(meta.questionIndex)];
-        const feature={questionIndex:Number(meta.questionIndex),questionText:meta.questionText||'',setId:meta.setId||null,summary:captured.summary,frames:captured.frames,skipped:wasSkipped,mimeType:captured.mimeType,voiceMetricsVersion:VOICE_METRICS_VERSION};
+        const feature={questionIndex:Number(meta.questionIndex),questionText:meta.questionText||'',setId:meta.setId||null,summary:captured.summary,frames:captured.frames,skipped:wasSkipped,mimeType:captured.mimeType,micMeta:{...(state.micMeta||{}),connectionType:state.micConnectionType},baselineCapturedAt:state.voiceBaseline?.capturedAt||null,voiceMetricsVersion:VOICE_METRICS_VERSION};
         await backend.saveVoiceFeature(state.sessionId,roleSide(),feature.questionIndex,feature);
-        processAiQuestion(captured,feature);
+        processAiTranscript(captured,feature);
       }
     }finally{state.voiceTransitionBusy=false;}
   }
   if(shouldRecord&&!vc.activeMeta&&state.voiceStatus==='READY'){
-    vc.startQuestion({questionIndex:qIndex,questionText:phase.questionText||'',setId:phase.setId||null});
+    const rt=runtimeInfo(state.session);
+    vc.startQuestion({questionIndex:qIndex,questionText:phase.questionText||'',setId:phase.setId||null,sessionElapsedAtStartMs:rt.elapsed,phaseStartOffsetMs:phase.startOffsetMs});
   }
 }
 
@@ -604,14 +653,38 @@ function resultDisplay(s){
   </div>`,{display:true});
 }
 async function loadSupplementalForResult(sessionId,expectedQuestions){
-  let voiceA=[],voiceB=[],ai=[];
-  for(let i=0;i<4;i++){
-    [voiceA,voiceB,ai]=await Promise.all([backend.loadVoiceFeatures(sessionId,'A'),backend.loadVoiceFeatures(sessionId,'B'),backend.loadAiAnalyses(sessionId)]);
-    if(voiceA.length>=expectedQuestions&&voiceB.length>=expectedQuestions&&ai.length>=Math.max(1,expectedQuestions-1))break;
-    await new Promise(r=>setTimeout(r,550));
+  let voiceA=[],voiceB=[],transcripts=[],ai=[];
+  for(let i=0;i<10;i++){
+    [voiceA,voiceB,transcripts,ai]=await Promise.all([backend.loadVoiceFeatures(sessionId,'A'),backend.loadVoiceFeatures(sessionId,'B'),backend.loadAiTranscripts(sessionId),backend.loadAiAnalyses(sessionId)]);
+    const pairs=new Map();for(const t of transcripts){const q=Number(t.questionIndex);if(!Number.isFinite(q))continue;const x=pairs.get(q)||{};x[t.side]=t;pairs.set(q,x);}
+    const completePairs=[...pairs.values()].filter(x=>x.A&&x.B).length;
+    const voiceReady=voiceA.length>=expectedQuestions&&voiceB.length>=expectedQuestions;
+    const transcriptReady=!CONFIG.ai.enabled||!CONFIG.ai.requireBothTranscriptsForBonus||completePairs>=expectedQuestions;
+    if(voiceReady&&transcriptReady)break;
+    await new Promise(r=>setTimeout(r,700));
   }
-  return {voiceA,voiceB,ai};
+  return {voiceA,voiceB,transcripts,ai};
 }
+
+async function ensureAiTalkAnalyses(sessionId,supplemental,skippedQuestionIndexes=[]){
+  if(!CONFIG.ai.enabled)return supplemental.ai||[];
+  const existing=new Map((supplemental.ai||[]).map(x=>[Number(x.questionIndex),x]));
+  const byQ=new Map();for(const t of supplemental.transcripts||[]){const q=Number(t.questionIndex);if(!Number.isFinite(q))continue;const row=byQ.get(q)||{};row[t.side]=t;byQ.set(q,row);}
+  const voiceByQ=new Map([...(supplemental.voiceA||[]),...(supplemental.voiceB||[])].map(x=>[Number(x.questionIndex),x]));
+  for(const [q,row] of [...byQ.entries()].sort((a,b)=>a[0]-b[0])){
+    if(skippedQuestionIndexes.includes(q)||existing.has(q))continue;
+    if(CONFIG.ai.requireBothTranscriptsForBonus&&(!row.A||!row.B))continue;
+    const transcriptA=String(row.A?.transcript||''),transcriptB=String(row.B?.transcript||'');
+    if(!transcriptA&&!transcriptB)continue;
+    const questionText=row.A?.questionText||row.B?.questionText||voiceByQ.get(q)?.questionText||'';
+    try{
+      const ai=await analyzeConversationTranscripts({sessionId,questionIndex:q,questionText,transcriptA,transcriptB});
+      if(ai){const saved={...ai,questionText,transcriptSides:{A:!!row.A,B:!!row.B},aiTalkVersion:AI_TALK_VERSION};await backend.saveAiAnalysis(sessionId,q,saved);existing.set(q,{...saved,questionIndex:q});}
+    }catch(e){console.warn('AI paired talk analysis failed',e);await backend.appendAuditLog(sessionId,{eventType:'AI_TALK_FAILED',details:{questionIndex:q,message:String(e?.message||e).slice(0,160)}}).catch(()=>{});}
+  }
+  return [...existing.values()].sort((a,b)=>Number(a.questionIndex)-Number(b.questionIndex));
+}
+
 async function calculateResults(){
   const s=await backend.loadSession(state.sessionId);await backend.flushOutbox();const a=await backend.loadHr(s.sessionId,'A'),b=await backend.loadHr(s.sessionId,'B');
   const skippedQuestionIndexes=Object.keys(s.skippedQuestions||{}).map(Number).filter(Number.isFinite);
@@ -620,6 +693,7 @@ async function calculateResults(){
   const supplemental=await loadSupplementalForResult(s.sessionId,expectedQuestions);
   const validA=supplemental.voiceA.filter(x=>!x.skipped),validB=supplemental.voiceB.filter(x=>!x.skipped);
   const voiceMetrics=computeVoiceSessionMetrics(validA,validB);
+  supplemental.ai=await ensureAiTalkAnalyses(s.sessionId,supplemental,skippedQuestionIndexes);
   const aiRows=supplemental.ai.filter(x=>!skippedQuestionIndexes.includes(Number(x.questionIndex)));
   const aiTalkBonus=clamp(aiRows.reduce((sum,x)=>sum+Number(x.bonus||x.analysis?.bonus||0),0),0,CONFIG.experienceScore.aiTalkBonusMax);
   const heartScore=result.session.neoScore,voiceScore=voiceMetrics.valid?voiceMetrics.voiceScore:null;
@@ -686,7 +760,7 @@ function recordsListView(){
   const rows=filteredSessions(),selected=state.exportSelected.size;
   return `<div class="panel records-panel"><div class="records-controls"><input id="records-search" placeholder="測定ID / 参加者ID / ペアを検索" value="${esc(state.recordsSearch)}"><select id="records-protocol"><option value="ALL">すべての実験方式 (Protocol)</option>${['RESEARCH_V1','EVENT_V2','EVENT_V1'].map(x=>`<option value="${x}" ${state.recordsProtocol===x?'selected':''}>${protocolLabel(x)}</option>`).join('')}</select><select id="records-status"><option value="ALL">すべての状態 (Status)</option>${Object.values(SESSION_STATUS).map(x=>`<option value="${x}" ${state.recordsStatus===x?'selected':''}>${statusLabel(x)}</option>`).join('')}</select></div>
     <div class="export-selection-bar"><span><b>${selected} 件</b> 選択中</span><button class="btn btn-quiet" data-action="export-select-visible">表示中をすべて選択</button><button class="btn btn-quiet" data-action="export-clear-selected">選択解除</button><button class="btn primary" data-action="export-open" ${selected?'':'disabled'}>選択した実験をまとめて書き出す →</button></div>
-    <div class="table-wrap"><table class="records-table"><thead><tr><th>選択</th><th>測定ID (Measurement)</th><th>日時 (Date)</th><th>実験方式 (Protocol)</th><th>ペア (Pair)</th><th>関係カテゴリ (Category)</th><th>状態 (Status)</th><th>品質 (Quality)</th><th>NEO SCORE</th></tr></thead><tbody>${rows.map(s=>`<tr class="clickable" data-session-open="${esc(s.sessionId)}"><td><input class="export-session-checkbox" type="checkbox" aria-label="${esc(s.displayId)} を選択" data-export-session="${esc(s.sessionId)}" ${state.exportSelected.has(s.sessionId)?'checked':''}></td><td><b>${esc(s.displayId)}</b></td><td>${new Date(s.createdAt||0).toLocaleString('ja-JP')}</td><td>${esc(protocolLabel(s.protocolId))}</td><td>${esc(s.participantAId)} × ${esc(s.participantBId)}</td><td>${esc(s.questionCategory||'—')}</td><td>${esc(statusLabel(s.status))}</td><td>${esc(qualityLabel(s.quality?.label||s.metrics?.quality?.label))}</td><td>${Number.isFinite(s.displayResult?.neoScore)?Math.round(s.displayResult.neoScore):'—'}</td></tr>`).join('')}</tbody></table></div>${!rows.length?'<p class="subtitle">条件に一致する記録がありません。</p>':''}</div>`;
+    <div class="table-wrap"><table class="records-table"><thead><tr><th>選択</th><th>測定ID (Measurement)</th><th>日時 (Date)</th><th>実験方式 (Protocol)</th><th>ペア (Pair)</th><th>関係カテゴリ (Category)</th><th>状態 (Status)</th><th>品質 (Quality)</th><th>VOICE</th><th>NEO SCORE</th></tr></thead><tbody>${rows.map(s=>`<tr class="clickable" data-session-open="${esc(s.sessionId)}"><td><input class="export-session-checkbox" type="checkbox" aria-label="${esc(s.displayId)} を選択" data-export-session="${esc(s.sessionId)}" ${state.exportSelected.has(s.sessionId)?'checked':''}></td><td><b>${esc(s.displayId)}</b></td><td>${new Date(s.createdAt||0).toLocaleString('ja-JP')}</td><td>${esc(protocolLabel(s.protocolId))}</td><td>${esc(s.participantAId)} × ${esc(s.participantBId)}</td><td>${esc(s.questionCategory||'—')}</td><td>${esc(statusLabel(s.status))}</td><td>${esc(qualityLabel(s.quality?.label||s.metrics?.quality?.label))}</td><td>${Number.isFinite(s.voiceMetrics?.voiceScore)?Math.round(s.voiceMetrics.voiceScore):'—'}</td><td>${Number.isFinite(s.displayResult?.neoScore)?Math.round(s.displayResult.neoScore):'—'}</td></tr>`).join('')}</tbody></table></div>${!rows.length?'<p class="subtitle">条件に一致する記録がありません。</p>':''}</div>`;
 }
 function participantsView(){
   const map=new Map();for(const s of state.recordsCache)for(const id of [s.participantAId,s.participantBId]){if(!id)continue;const x=map.get(id)||{id,count:0,last:0,partners:new Set()};x.count++;x.last=Math.max(x.last,s.createdAt||0);const other=id===s.participantAId?s.participantBId:s.participantAId;if(other)x.partners.add(other);map.set(id,x);}
@@ -703,10 +777,10 @@ function analysisView(){
 function exportView(){
   const total=state.exportSelected.size;
   return `<div class="panel"><div class="section-title">研究データ共有 (RESEARCH EXPORT / EXPORT_V1)</div><h2>複数の実験を、1つのZIPファイルに</h2>
-    <p class="subtitle">選択した実験のRAW心拍A/B（全件）、1Hz補正後の心拍、保存済み5指標・質問別結果・NEO SCORE・品質・質問・イベントログをまとめて保存します。研究用アンケートも追加できます。</p>
+    <p class="subtitle">選択した実験のRAW心拍A/B（全件）、1Hz補正後の心拍、保存済み5指標・質問別結果・VOICE特徴量・AI会話分析・NEO SCORE・品質・質問・イベントログをまとめて保存します。研究用アンケートも追加できます。</p>
     <div class="export-selection-bar"><span>選択中：<b>${total} セッション</b></span><button class="btn btn-quiet" data-action="export-select-visible">表示中をすべて選択</button><button class="btn btn-quiet" data-action="export-select-all">全セッションを選択</button><button class="btn btn-quiet" data-action="export-clear-selected">選択解除</button></div>
     <div class="export-selected-list">${state.recordsCache.filter(s=>state.exportSelected.has(s.sessionId)).map(s=>`<span>${esc(s.displayId||s.sessionId)}　${esc(s.questionCategory||'')}　${esc(s.status||'')}</span>`).join('')||'<span>「記録」画面でチェックするか、ここで全セッションを選択してください。</span>'}</div>
-    <div class="export-options"><label class="export-option"><input type="checkbox" id="export-surveys"> <span>研究アンケートも含める（個別回答・任意の恋愛項目を含むことがあります）</span></label><label class="export-option"><input type="checkbox" id="export-free-text" disabled> <span>自由記述・「その他」入力も含める（個人情報が書かれていないか送信前に確認）</span></label></div>
+    <div class="export-options"><label class="export-option"><input type="checkbox" id="export-surveys"> <span>研究アンケートも含める（個別回答・任意の恋愛項目を含むことがあります）</span></label><label class="export-option"><input type="checkbox" id="export-free-text" disabled> <span>自由記述・「その他」入力・AI文字起こしも含める（個人情報が書かれていないか送信前に確認）</span></label></div>
     <div class="callout info">研究ID・計測時刻は解析に必要なため保持します。氏名／端末ID／認証情報／セッション参加コードは書き出しません。研究IDも複数記録の照合が可能なため、共有相手を確認してください。アンケートの内容は相手の参加者に見せないでください。</div>
     <div class="callout warn">取りこぼし防止：書き出し前に計測端末A・Bをオンラインに戻し、未送信データの同期を確認してください。取得に失敗した場合は不完全なZIPを作りません。</div>
     <div class="actions"><button class="btn primary" data-action="export-full-zip" ${!total||state.exportBusy?'disabled':''}>${state.exportBusy?'ZIPを準備中…':`選択した${total}件の全データを1つのZIPに保存`}</button></div>
@@ -716,9 +790,10 @@ function exportView(){
 }
 async function renderSessionDetail(el){
   const s=state.recordsCache.find(x=>x.sessionId===state.recordsSelectedSessionId)||await backend.loadSession(state.recordsSelectedSessionId);if(!s){state.recordsSelectedSessionId=null;el.innerHTML=recordsListView();return;}
-  const tabs=[['overview','概要 (Overview)'],['heart','心拍数 (Heart Rate)'],['metrics','指標 (Metrics)'],['questionnaire','アンケート (Questionnaire)'],['quality','品質・ログ (Quality & Logs)'],['raw','生データ (Raw Data)']];
+  const tabs=[['overview','概要 (Overview)'],['heart','心拍数 (Heart Rate)'],['voice','音声・AI (Voice / AI)'],['metrics','指標 (Metrics)'],['questionnaire','アンケート (Questionnaire)'],['quality','品質・ログ (Quality & Logs)'],['raw','生データ (Raw Data)']];
   let content='';
   if(state.recordsTab==='heart')content=await recordsHeartTab(s);
+  else if(state.recordsTab==='voice')content=await recordsVoiceTab(s);
   else if(state.recordsTab==='metrics')content=recordsMetricsTab(s);
   else if(state.recordsTab==='questionnaire')content=await recordsQuestionnaireTab(s);
   else if(state.recordsTab==='quality')content=await recordsQualityTab(s);
@@ -729,6 +804,62 @@ async function renderSessionDetail(el){
 function recordsOverviewTab(s){return `<div class="overview-grid">${kv('測定ID (Measurement ID)',s.displayId)}${kv('内部ID (Internal UUID)',s.sessionId)}${kv('実験方式 (Protocol)',protocolLabel(s.protocolId))}${kv('状態 (Status)',statusLabel(s.status))}${kv('参加者A (Participant A)',s.participantAId)}${kv('参加者B (Participant B)',s.participantBId)}${kv('ペアID (Canonical Pair)',s.canonicalPairKey||canonicalPair(s.participantAId,s.participantBId))}${kv('関係カテゴリ (Question Category)',s.questionCategory)}${kv('質問セット順 (Set order)',s.setOrder)}${isEventProtocol(s.protocolId)?kv('こどもサポート (Child Support)',s.childSupport?'ON':'OFF'):''}${s.childSupport?kv('こどもサポート版 (Child Support Version)',s.childSupportVersion||'legacy'):''}${isEventProtocol(s.protocolId)?kv('イベント説明版 (Event Guide)',s.eventGuideVersion||'legacy'):''}${kv('質問スキップ数 (Skipped Questions)',Object.keys(s.skippedQuestions||{}).length)}${kv('操作端末 (Controller)',roleLabel(s.controllerDevice))}${kv('作成日時 (Created)',new Date(s.createdAt||0).toLocaleString('ja-JP'))}${kv('アプリ版 (APP)',s.appVersion)}${kv('質問バンク (Question Bank)',s.questionBankVersion)}${kv('前処理 (Preprocessing)',s.preprocessingVersion)}${kv('指標計算 (Metrics)',s.metricsVersion)}${kv('表示スコア方式 (Display Score)',s.displayScoreVersion)}${kv('表示尺度 (Display Scale)',s.displayScaleVersion)}</div><div class="callout" style="margin-top:18px">NEO SCOREは体験表示値です。質問をスキップした場合、その質問はセッション指標の集計から除外します。</div>`;}
 const kv=(k,v)=>`<div class="kv"><span>${esc(k)}</span><b>${esc(v??'—')}</b></div>`;
 async function recordsHeartTab(s){const [a,b]=await Promise.all([backend.loadHr(s.sessionId,'A'),backend.loadHr(s.sessionId,'B')]);return `<div class="section-title">実セッション経過時間 (TRUE SESSION ELAPSED TIME)</div><div class="dual-chart">${dualHrSvg(a,b)}</div><div class="legend"><span class="legend-a">参加者A (A)</span><span class="legend-b">参加者B (B)</span><span>欠測は線をつながず、空白 (gap) として表示</span></div><div class="grid3" style="margin-top:18px"><div class="kpi"><small>A 取得件数 (A samples)</small><strong>${a.length}</strong></div><div class="kpi"><small>B 取得件数 (B samples)</small><strong>${b.length}</strong></div><div class="kpi"><small>計測時間 (Duration)</small><strong>${fmt(Math.max(a.at(-1)?.sessionElapsedMs||0,b.at(-1)?.sessionElapsedMs||0))}</strong></div></div>`;}
+async function recordsVoiceTab(s){
+  const [voiceA,voiceB,baselineA,baselineB,aiTranscripts,aiTalk]=await Promise.all([
+    backend.loadVoiceFeatures(s.sessionId,'A'),backend.loadVoiceFeatures(s.sessionId,'B'),backend.loadVoiceBaseline(s.sessionId,'A'),backend.loadVoiceBaseline(s.sessionId,'B'),backend.loadAiTranscripts(s.sessionId),backend.loadAiAnalyses(s.sessionId)
+  ]);
+  const vm=s.voiceMetrics||s.displayResult?.voiceMetrics||{};
+  const bonus=clamp(aiTalk.reduce((sum,x)=>sum+Number(x?.bonus||x?.analysis?.bonus||0),0),0,CONFIG.experienceScore.aiTalkBonusMax);
+  const byQ=(rows)=>new Map((rows||[]).map(x=>[Number(x.questionIndex),x]));
+  const A=byQ(voiceA),B=byQ(voiceB),AI=byQ(aiTalk);
+  const TR=new Map();for(const t of aiTranscripts||[]){const q=Number(t.questionIndex);const row=TR.get(q)||{};row[t.side]=t;TR.set(q,row);}
+  const qs=[...new Set([...A.keys(),...B.keys(),...AI.keys(),...TR.keys(),...(vm.questions||[]).map(x=>Number(x.questionIndex))])].filter(Number.isFinite).sort((a,b)=>a-b);
+  const f=(x,d=1)=>Number.isFinite(Number(x))?Number(x).toFixed(d):'—';
+  const pct=x=>Number.isFinite(Number(x))?(Number(x)*100).toFixed(1)+'%':'—';
+  const score=x=>Number.isFinite(Number(x))?Math.round(Number(x)):'—';
+  const speakerLabel=x=>({A:'A',B:'B',BOTH:'BOTH',UNKNOWN:'UNKNOWN',SILENCE:'SILENCE'}[x]||'UNKNOWN');
+  const speakerRows=(a,b)=>{
+    if(!a?.frames?.length&&!b?.frames?.length)return '<p class="subtitle">話者タイムラインはありません。</p>';
+    const timeline=classifySpeakerTimeline(a?.frames||[],b?.frames||[],{thresholdA:Number(a?.summary?.speechThreshold)||CONFIG.voice.speechRmsThreshold,thresholdB:Number(b?.summary?.speechThreshold)||CONFIG.voice.speechRmsThreshold});
+    const stats=summarizeSpeakerTimeline(timeline);
+    return `<div class="grid5" style="margin:12px 0"><div class="kpi"><small>A判定</small><strong>${stats.counts.A}</strong></div><div class="kpi"><small>B判定</small><strong>${stats.counts.B}</strong></div><div class="kpi"><small>BOTH</small><strong>${stats.counts.BOTH}</strong></div><div class="kpi"><small>UNKNOWN</small><strong>${stats.counts.UNKNOWN}</strong></div><div class="kpi"><small>SILENCE</small><strong>${stats.counts.SILENCE}</strong></div></div><div class="table-wrap"><table class="records-table raw-table"><thead><tr><th>質問内経過ms</th><th>話者判定</th><th>A RMS</th><th>B RMS</th><th>A Pitch</th><th>B Pitch</th><th>確信度</th></tr></thead><tbody>${timeline.map(x=>`<tr><td>${Math.round(x.tMs||0)}</td><td><b>${speakerLabel(x.speaker)}</b></td><td>${f(x.a?.rms,4)}</td><td>${f(x.b?.rms,4)}</td><td>${f(x.a?.pitch,1)}</td><td>${f(x.b?.pitch,1)}</td><td>${f(x.confidence,2)}</td></tr>`).join('')}</tbody></table></div>`;
+  };
+  const frameRows=(a,b)=>{
+    const rows=[...(a?.frames||[]).map(x=>({...x,side:'A'})),...(b?.frames||[]).map(x=>({...x,side:'B'}))].sort((x,y)=>(x.phaseElapsedMs??x.tOffsetMs??0)-(y.phaseElapsedMs??y.tOffsetMs??0)||String(x.side).localeCompare(String(y.side)));
+    if(!rows.length)return '<p class="subtitle">時系列音声特徴データはありません。</p>';
+    return `<div class="table-wrap"><table class="records-table raw-table"><thead><tr><th>側</th><th>質問内経過ms</th><th>セッション経過ms</th><th>RMS</th><th>Pitch Hz</th><th>発話判定</th></tr></thead><tbody>${rows.map(x=>`<tr><td>${x.side}</td><td>${Math.round(x.phaseElapsedMs??x.tOffsetMs??0)}</td><td>${Number.isFinite(Number(x.sessionElapsedMs))?Math.round(x.sessionElapsedMs):'—'}</td><td>${f(x.rms,4)}</td><td>${f(x.pitch,1)}</td><td>${x.active?'VOICE':'—'}</td></tr>`).join('')}</tbody></table></div>`;
+  };
+  const questionBlocks=qs.map(q=>{
+    const a=A.get(q),b=B.get(q),ai=AI.get(q),tr=TR.get(q)||{},combined=(vm.questions||[]).find(x=>Number(x.questionIndex)===q)||{};
+    const sa=a?.summary||{},sb=b?.summary||{},an=ai?.analysis||{};
+    const qtext=a?.questionText||b?.questionText||tr.A?.questionText||tr.B?.questionText||ai?.questionText||`質問 ${q+1}`;
+    return `<section style="margin-top:24px"><h3>Q${q+1}　${esc(qtext)}</h3>
+      <div class="grid4" style="margin-top:12px"><div class="kpi"><small>Pitch Response</small><strong>${score(combined.pitchResponse)}</strong></div><div class="kpi"><small>Expressiveness</small><strong>${score(combined.expressiveness)}</strong></div><div class="kpi"><small>Speech Balance</small><strong>${score(combined.speechBalance)}</strong></div><div class="kpi"><small>Turn Taking</small><strong>${score(combined.turnTaking)}</strong></div></div>
+      <div class="table-wrap" style="margin-top:14px"><table class="records-table"><thead><tr><th>音声特徴</th><th>参加者A</th><th>参加者B</th></tr></thead><tbody>
+        <tr><td>平均声高 (Pitch mean)</td><td>${f(sa.pitchMeanHz,1)} Hz</td><td>${f(sb.pitchMeanHz,1)} Hz</td></tr>
+        <tr><td>本人基準からの変化</td><td>${f(sa.pitchDeltaHz,1)} Hz / ${f(sa.pitchDeltaPct,1)}% / ${esc(sa.pitchDirection||'—')}</td><td>${f(sb.pitchDeltaHz,1)} Hz / ${f(sb.pitchDeltaPct,1)}% / ${esc(sb.pitchDirection||'—')}</td></tr>
+        <tr><td>基準比（cents / z）</td><td>${f(sa.pitchDeltaCents,0)} cents / ${f(sa.pitchDeltaZ,2)}</td><td>${f(sb.pitchDeltaCents,0)} cents / ${f(sb.pitchDeltaZ,2)}</td></tr>
+        <tr><td>基準からの音量差</td><td>${f(sa.rmsDeltaDb,1)} dB</td><td>${f(sb.rmsDeltaDb,1)} dB</td></tr>
+        <tr><td>声高SD (Pitch SD)</td><td>${f(sa.pitchStdHz,1)} Hz</td><td>${f(sb.pitchStdHz,1)} Hz</td></tr>
+        <tr><td>Pitch P10–P90</td><td>${f(sa.pitchP10Hz,1)} – ${f(sa.pitchP90Hz,1)} Hz</td><td>${f(sb.pitchP10Hz,1)} – ${f(sb.pitchP90Hz,1)} Hz</td></tr>
+        <tr><td>RMS平均 / RMS CV</td><td>${f(sa.rmsMean,4)} / ${f(sa.rmsCv,3)}</td><td>${f(sb.rmsMean,4)} / ${f(sb.rmsCv,3)}</td></tr>
+        <tr><td>発話率 (Speech ratio)</td><td>${pct(sa.speechRatio)}</td><td>${pct(sb.speechRatio)}</td></tr>
+      </tbody></table></div>
+      <div class="grid4" style="margin-top:14px"><div class="kpi"><small>会話交代回数</small><strong>${combined.turnCount??'—'}</strong></div><div class="kpi"><small>同時発話率</small><strong>${pct(combined.overlapRatio)}</strong></div><div class="kpi"><small>UNKNOWN率</small><strong>${pct(combined.unknownRatio)}</strong></div><div class="kpi"><small>AI TALK BONUS</small><strong>${Number.isFinite(Number(ai?.bonus))?'+'+Number(ai.bonus):'—'}</strong></div></div>
+      <div class="dual-transcript" style="margin-top:14px"><div class="callout info"><b>A側マイク文字起こし</b><br>${esc(tr.A?.transcript||'（なし）')}</div><div class="callout info"><b>B側マイク文字起こし</b><br>${esc(tr.B?.transcript||'（なし）')}</div></div>
+      ${ai?`<div class="callout" style="margin-top:10px"><b>AI会話分析：</b>${esc(an.summary||'分析結果なし')}<br><span class="mini">質問への関与 ${score(an.questionEngagement)} / 相互応答 ${score(an.mutualResponse)} / 自己開示 ${score(an.selfDisclosure)} / 感情表現 ${score(an.emotionalExpression)} / 会話の豊かさ ${score(an.conversationalRichness)}</span>${Array.isArray(an.evidence)&&an.evidence.length?`<br><span class="mini">根拠：${an.evidence.map(esc).join(' ／ ')}</span>`:''}</div>`:'<div class="callout" style="margin-top:10px">AI会話分析は未保存、またはA/B両方の文字起こしが揃っていません。</div>'}
+      <details style="margin-top:14px"><summary>A / B / BOTH / UNKNOWN / SILENCE の話者判定を表示</summary>${speakerRows(a,b)}</details>
+      <details style="margin-top:14px"><summary>200msごとの元音声特徴データを表示</summary>${frameRows(a,b)}</details>
+    </section>`;
+  }).join('');
+  const baselineSummary=(row,side)=>{const b=row?.summary||{},m=row?.micMeta||s.micProfile?.[side]||{};return `<tr><td>${side}</td><td>${esc(m.connectionType||'UNKNOWN')}</td><td>${esc(m.label||'—')}</td><td>${f(b.pitchMeanHz,1)} Hz</td><td>${f(b.pitchStdHz,1)} Hz</td><td>${f(b.rmsMean,4)}</td><td>${pct(b.speechRatio)}</td><td>${Number.isFinite(Number(m.reportedInputLatencyMs))?f(m.reportedInputLatencyMs,1)+' ms':'—'}</td><td>${f(m.latencyCorrectionMs,1)} ms</td></tr>`;};
+  return `<div class="section-title">VOICE / AI RECORD</div><div class="table-wrap" style="margin-bottom:18px"><table class="records-table"><thead><tr><th>側</th><th>接続方式</th><th>マイク名</th><th>基準F0</th><th>基準F0 SD</th><th>基準RMS</th><th>基準発話率</th><th>報告入力遅延</th><th>適用補正</th></tr></thead><tbody>${baselineSummary(baselineA,'A')}${baselineSummary(baselineB,'B')}</tbody></table></div>
+    <div class="callout info" style="margin-bottom:18px"><b>「声が元々高い＝高反応」にはしません。</b><br>Pitch Responseは各自の10秒基準声に対するΔHz・Δ%・centsを保存し、主判定は本人内の相対変化率です。UP / DOWN / SAMEは方向として別保存し、UPだから高得点という扱いもしません。</div>
+    <div class="callout info" style="margin-bottom:18px"><b>話者判定：</b>片耳マイク2本の時系列を共通時間軸で比較し、A / B / BOTH / UNKNOWN / SILENCE の5種類で保存・表示します。判別が曖昧な音はUNKNOWNのまま残します。</div>
+    <div class="grid5"><div class="kpi"><small>VOICE SCORE β</small><strong>${score(vm.voiceScore)}</strong></div><div class="kpi"><small>Pitch Response</small><strong>${score(vm.pitchResponse)}</strong></div><div class="kpi"><small>Expressiveness</small><strong>${score(vm.expressiveness)}</strong></div><div class="kpi"><small>Speech Balance</small><strong>${score(vm.speechBalance)}</strong></div><div class="kpi"><small>Turn Taking</small><strong>${score(vm.turnTaking)}</strong></div></div>
+    <div class="callout info" style="margin-top:18px"><b>AI TALK BONUS 合計：+${bonus} / ${CONFIG.experienceScore.aiTalkBonusMax}</b><br>A/Bそれぞれの口元マイク音声を別々に文字起こしし、その2本を合わせて会話特徴だけをAIが補助評価します。AIは親密さ・恋愛感情を直接判定しません。生音声ファイルは研究DBには保存せず、特徴量・文字起こし・AI結果を保存します。</div>${questionBlocks||'<p class="subtitle" style="margin-top:18px">このセッションには音声記録がありません。</p>'}`;
+}
+
 function splitByGap(arr,gap=CONFIG.graphGapMs){const chunks=[];let cur=[];for(const p of arr){if(cur.length&&p.sessionElapsedMs-cur.at(-1).sessionElapsedMs>gap){chunks.push(cur);cur=[];}cur.push(p);}if(cur.length)chunks.push(cur);return chunks;}
 function dualHrSvg(a,b){const all=[...a,...b].filter(x=>Number.isFinite(x.bpm)&&Number.isFinite(x.sessionElapsedMs));if(!all.length)return '<div class="chart-empty">心拍データなし</div>';const w=1100,h=330,minT=0,maxT=Math.max(...all.map(x=>x.sessionElapsedMs),1),minB=Math.min(...all.map(x=>x.bpm))-4,maxB=Math.max(...all.map(x=>x.bpm))+4;const points=arr=>arr.map(p=>`${p.sessionElapsedMs/maxT*w},${h-(p.bpm-minB)/(maxB-minB||1)*h}`).join(' ');return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">${splitByGap(a).map(c=>`<polyline class="lineA" points="${points(c)}"/>`).join('')}${splitByGap(b).map(c=>`<polyline class="lineB" points="${points(c)}"/>`).join('')}</svg>`;}
 const metricCell=(value,reason=null,digits=1)=>Number.isFinite(value)?num(value,digits):`<span class="na-value" title="${esc(reasonLabel(reason)||'算出条件を満たしませんでした')}">算出不可 (NA)</span>`;
@@ -797,6 +928,8 @@ function bind(){
     const syncRelationshipOther=()=>{const isOther=rels.some(x=>x.checked&&x.value==='その他');if(otherWrap)otherWrap.hidden=!isOther;if(otherInput){otherInput.disabled=!isOther;otherInput.required=isOther;if(!isOther)otherInput.value='';}};
     rels.forEach(x=>x.addEventListener('change',syncRelationshipOther));syncRelationshipOther();
   }
+  const micType=document.querySelector('#mic-connection-type');if(micType)micType.addEventListener('change',()=>{state.micConnectionType=micType.value||'UNKNOWN';});
+  const micDevice=document.querySelector('#mic-device-select');if(micDevice)micDevice.addEventListener('change',()=>{state.micDeviceId=micDevice.value||'';});
   const pin=document.querySelector('#records-pin');if(pin)pin.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();handleAction('unlock-records',document.querySelector('[data-action="unlock-records"]'));}});
   syncSessionCreationForm();
 }
@@ -812,7 +945,7 @@ function bindDynamic(){
 
 async function handleAction(a,el){
   if(a==='display-home')return clearRole();if(a==='home')return clearRole();if(a==='create-session')return createSession();if(a==='join-session')return joinSession();
-  if(a==='connect-hw9')return connectSensor(false);if(a==='connect-demo')return connectSensor(true);if(a==='connect-mic')return connectMicrophone();
+  if(a==='connect-hw9')return connectSensor(false);if(a==='connect-demo')return connectSensor(true);if(a==='refresh-mics')return refreshMicrophoneList();if(a==='connect-mic')return connectMicrophone();if(a==='measure-voice-baseline')return measureVoiceBaseline();
   if(a==='open-pre-survey'){state.surveyStage='pre';state.surveySide=roleSide();return render();}if(a==='open-post-survey'){state.surveyStage='post';state.surveySide=roleSide();return render();}
   if(a==='cancel-survey'){if(confirm('アンケートを閉じて運用画面へ戻りますか？入力中の内容は保存されません。')){state.surveyStage=null;state.surveySide=null;render();}return;}
   if(a==='staff-return'){if(confirm('実験担当者の操作画面へ戻りますか？')){state.surveyLocked=null;await refreshSession();render();}return;}

@@ -1,5 +1,5 @@
-import { CONFIG, APP_VERSION } from './config.js?v=0.4.0b1';
-import { putHr, getHr as getLocalHr, putSurvey, getSurvey as getLocalSurvey, putOutbox, deleteOutbox, listOutbox } from './idb.js?v=0.4.0b1';
+import { CONFIG, APP_VERSION } from './config.js?v=0.4.0b4';
+import { putHr, getHr as getLocalHr, putSurvey, getSurvey as getLocalSurvey, putOutbox, deleteOutbox, listOutbox } from './idb.js?v=0.4.0b4';
 
 const SDK='12.17.1';
 const [{initializeApp,getApps},{getDatabase,ref,set,update,get,onValue,runTransaction,onDisconnect,push},{getAuth,signInAnonymously,onAuthStateChanged}] = await Promise.all([
@@ -105,6 +105,8 @@ export async function updateSession(sessionId,patch){
 }
 export async function setSensorReady(sessionId,side,ready){await set(ref(db,`session_meta/${sessionId}/sensorReady/${side}`),!!ready);await refreshPublic(sessionId);}
 export async function setMicReady(sessionId,side,ready){await set(ref(db,`session_meta/${sessionId}/micReady/${side}`),!!ready);await refreshPublic(sessionId);}
+export async function setMicProfile(sessionId,side,profile){await set(ref(db,`session_meta/${sessionId}/micProfile/${side}`),profile||null);await refreshPublic(sessionId);}
+export async function setVoiceBaselineReady(sessionId,side,ready){await set(ref(db,`session_meta/${sessionId}/voiceBaselineReady/${side}`),!!ready);await refreshPublic(sessionId);}
 export async function setSurveyStatus(sessionId,key,value=true){await set(ref(db,`session_meta/${sessionId}/surveyStatus/${key}`),!!value);await refreshPublic(sessionId);}
 
 export async function loadSession(sessionId){watch(sessionId);const path=currentRole()==='DISPLAY'?`public_display/${sessionId}`:`session_meta/${sessionId}`;const s=await get(ref(db,path));return s.exists()?s.val():null;}
@@ -137,6 +139,14 @@ export async function saveVoiceFeature(sessionId,side,questionIndex,data){
 export async function loadVoiceFeatures(sessionId,side){
   try{const s=await get(ref(db,`voice_features/${sessionId}/${side}`));return Object.values(s.val()||{}).sort((a,b)=>Number(a.questionIndex)-Number(b.questionIndex));}catch{return [];}
 }
+export async function saveVoiceBaseline(sessionId,side,data){await set(ref(db,`voice_baseline/${sessionId}/${side}`),{...data,side,savedAt:now()});await set(ref(db,`session_meta/${sessionId}/voiceBaselineReady/${side}`),!!data?.quality?.valid);await refreshPublic(sessionId);}
+export async function loadVoiceBaseline(sessionId,side){try{const s=await get(ref(db,`voice_baseline/${sessionId}/${side}`));return s.exists()?s.val():null;}catch{return null;}}
+export async function saveAiTranscript(sessionId,questionIndex,side,data){
+  await set(ref(db,`ai_talk_transcripts/${sessionId}/${questionIndex}/${side}`),{...data,questionIndex,side,savedAt:now()});
+}
+export async function loadAiTranscripts(sessionId){
+  try{const s=await get(ref(db,`ai_talk_transcripts/${sessionId}`));const raw=s.val()||{};const out=[];for(const [q,row] of Object.entries(raw))for(const side of ['A','B'])if(row?.[side])out.push({...row[side],questionIndex:Number(q),side});return out.sort((a,b)=>Number(a.questionIndex)-Number(b.questionIndex)||String(a.side).localeCompare(String(b.side)));}catch{return [];}
+}
 export async function saveAiAnalysis(sessionId,questionIndex,data){
   await set(ref(db,`ai_talk_analysis/${sessionId}/${questionIndex}`),{...data,questionIndex,savedAt:now()});
 }
@@ -148,7 +158,7 @@ export async function allSessions(){const s=await get(ref(db,'session_meta'));re
 /** Unlike the Records preview readers, export must fail loudly on a denied/offline cloud read. */
 export async function loadExportBundle(sessionId,{includeSurveys=true}={}){
   if(!connected)throw new Error('Firebaseがオフラインです。');
-  const [meta,rawA,rawB,questionnaires,events,voiceA,voiceB,aiTalk]=await Promise.all([
+  const [meta,rawA,rawB,questionnaires,events,voiceA,voiceB,baselineA,baselineB,aiTranscripts,aiTalk]=await Promise.all([
     get(ref(db,`session_meta/${sessionId}`)),
     get(ref(db,`heart_rate_raw/${sessionId}/A`)),
     get(ref(db,`heart_rate_raw/${sessionId}/B`)),
@@ -156,6 +166,9 @@ export async function loadExportBundle(sessionId,{includeSurveys=true}={}){
     get(ref(db,`audit_logs/${sessionId}`)),
     get(ref(db,`voice_features/${sessionId}/A`)),
     get(ref(db,`voice_features/${sessionId}/B`)),
+    get(ref(db,`voice_baseline/${sessionId}/A`)),
+    get(ref(db,`voice_baseline/${sessionId}/B`)),
+    get(ref(db,`ai_talk_transcripts/${sessionId}`)),
     get(ref(db,`ai_talk_analysis/${sessionId}`)),
   ]);
   if(!meta.exists())throw new Error(`セッション ${sessionId} がありません。`);
@@ -170,7 +183,8 @@ export async function loadExportBundle(sessionId,{includeSurveys=true}={}){
     const local=await getLocalSurvey(sessionId,side,stage);
     if(local){surv[side]||={};surv[side][stage]=local;}
   }
-  return {session:meta.val(),rawA:a,rawB:b,surveys:surv,auditLogs:Object.values(events.val()||{}).sort((x,y)=>(x.timestamp||0)-(y.timestamp||0)),voiceA:Object.values(voiceA.val()||{}),voiceB:Object.values(voiceB.val()||{}),aiTalk:Object.values(aiTalk.val()||{})};
+  const transcripts=[];for(const [q,row] of Object.entries(aiTranscripts.val()||{}))for(const side of ['A','B'])if(row?.[side])transcripts.push({...row[side],questionIndex:Number(q),side});
+  return {session:meta.val(),rawA:a,rawB:b,surveys:surv,auditLogs:Object.values(events.val()||{}).sort((x,y)=>(x.timestamp||0)-(y.timestamp||0)),voiceA:Object.values(voiceA.val()||{}),voiceB:Object.values(voiceB.val()||{}),voiceBaselineA:baselineA.exists()?baselineA.val():null,voiceBaselineB:baselineB.exists()?baselineB.val():null,aiTranscripts:transcripts,aiTalk:Object.values(aiTalk.val()||{})};
 }
 
 
