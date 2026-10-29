@@ -1,136 +1,219 @@
-# LOVE METER NEO v0.4.0-beta.2
+# LOVE METER NEO v0.4.0-beta.5 LOCAL AI
 
-2026-10-29 の改良案を一度実装したβ版です。
+ダイフェスタ向け統合β版。心拍・音声・会話の反応を組み合わせ、カラオケ採点風の結果画面で表示します。
 
-## この版で入れたもの
+## この版の大きな変更
 
-### 1. 心拍計算の修正・V3暫定式
-- EVENT_V2 の Question Response で Q2/Q3 が無効になっていた問題を修正済み。
-- 旧 DISPLAY_SCORE_V2_PILOT は比較用 `legacyNeoScore` として保存。
-- β表示用 Heart V3 は以下の探索的重みを採用。
-  - Direction 15%
-  - Temporal 10%
-  - Magnitude 10%
-  - Question Response 25%
-  - Balance 40%
-- Balance が NA の場合は、利用可能な指標の重みを正規化してβスコアを計算する。
-- これは既存の少数研究データから作った暫定式で、科学的に確定した式ではない。
+AI処理を OpenAI API / Firebase Cloud Functions から切り離し、ブラウザ上のローカルAIへ変更しました。
 
-### 2. PC内蔵マイク
-- SENSOR A / B それぞれで「PCマイクを準備」を押してマイクを接続。
-- 質問中だけ音声解析を行う。
-- LOVE METER のDBには生音声ファイルを保存しない。
-- 保存するのは音声特徴量と、AIを使う場合は文字起こし・AI分析結果。
+- OpenAI APIキー：不要
+- OpenAI API課金：不要
+- Firebase Cloud Functions：不要
+- Firebase Blazeプラン：AIのためには不要
+- 生音声：外部AIサービスへ送信しない
+- 初回のみ：AIモデルファイルのダウンロードにインターネット接続が必要
+- 2回目以降：ブラウザキャッシュが残っていれば端末内で推論可能
 
-### 3. VOICE ANALYSIS β
-質問中の音声から次を計算する。
-- PITCH DYNAMICS β: 質問内のF0変動の大きさ。現段階では個人基準音声との差ではない。
-- EXPRESSIVENESS: F0変動幅と音量変動の組合せ。
-- SPEECH BALANCE: A/Bの発話量バランス。
-- TURN TAKING: A/Bの発話交代の多さをβ評価。
+Firebase Hosting / Realtime Database は、従来どおり3台PC同期・記録保存に利用します。
 
-VOICE SCORE β は利用可能な上記指標の平均。
+## 推奨ブラウザ
 
-注意：同じ部屋のPC内蔵マイクは相手の声も拾うため、Speech Balance / Turn Taking はクロストークの影響を受ける。ダイフェスタβ版では体験・検証用として扱い、正式研究ではマイク配置・話者分離の検証が必要。
+最新版 Google Chrome または Microsoft Edge。
 
-### 4. AI TALK BONUS
-- SENSOR A 側の質問音声を Firebase Cloud Function 経由で OpenAI API に送る。
-- `gpt-transcribe` で文字起こし。
-- 文字起こしをAIで、質問への取り組み・自己開示・感情表現・会話の内容的な豊かさという観察可能な特徴に分けて分析。
-- AIには親密さ、恋愛感情、相性を判定させない。
-- 各質問 0〜2点、セッション全体で最大 +5点のBONUS。
-- 話者分離を行っていないため、AI TALK BONUSでは「どちらが話したか」を推測させない。
+WebGPU が利用できる場合はGPUを優先します。WebGPUが使えない端末ではWASM/CPUへフォールバックするため、文字起こし・コメント生成が遅くなる場合があります。
 
-### 5. AI RESULT COMMENT
-Heart / Voice / AI TALK BONUS / 特徴をAIに渡し、結果画面用の短い一言コメントを生成する。
-コメントは採点には一切影響しない。
-AIが利用できない場合は、従来の心拍コメントへ自動フォールバックする。
+## ローカルAI構成
 
-### 6. カラオケ採点風の結果画面
-- 大きな総合点
-- RANK表示
-- HEART / VOICE / AI TALK BONUS の3本ゲージ
-- AI一言コメント
-- VOICE 4指標
-- HEART 5指標レーダー
-- 最も反応が大きかった質問
-- ネオン、光、キラキラ、採点画面風演出
+### SENSOR A / SENSOR B
 
-## β版の表示スコア
+各端末で音声認識モデルを準備します。
 
-Heart V3 と Voice β が両方取得できた場合：
+- ランタイム：Transformers.js
+- 音声認識：`onnx-community/whisper-tiny`
+- 言語：日本語
+- 用途：各参加者の質問中音声を端末内で文字起こし
 
-`BASE = Heart × 0.70 + Voice × 0.30`
+A/Bはマイク付き片耳イヤホンをそれぞれ自分のSENSOR PCへ接続します。A音声とB音声を別々に処理するため、AIによる話者分離を主手段にはしません。
 
-`EXPERIENCE SCORE β = BASE + AI TALK BONUS（最大+5、上限100）`
+### 操作端末（Controller）
 
-Voice が取得できなかった場合は Heart V3 をベースにする。
+操作端末では上記音声認識に加えて、会話分析・一言コメント用の小型言語モデルも準備します。
 
-この重みは研究で確定したものではなく、ダイフェスタ向け体験β版の暫定値。今後の心拍＋音声＋アンケート実験で見直す。
+- モデル：`onnx-community/Qwen2.5-0.5B-Instruct`
+- AI TALK BONUS：会話への関与、相互応答、自己開示、感情表現、会話の豊かさを補助評価
+- 一言コメント：HEART / VOICE / BONUSの結果に沿った短いカラオケ採点風コメント
 
-## AIを動かすための設定
+AIに「恋愛感情がある」「仲が良い」などを直接判定させません。
 
-Firebase Functions を使う。APIキーをブラウザ側の `src/config.js` に入れてはいけない。
+## 初回準備
 
-1. Firebase CLIでプロジェクトにログイン。
-2. Functions の secret `OPENAI_API_KEY` を設定。
-3. Functionsをデプロイ。
-4. Hostingもデプロイ。
+イベント前に、実際に使用するSENSOR A/Bの両PCで必ず実施してください。
+
+1. 最新版Chrome / EdgeでLOVE METERを開く
+2. SENSOR A / SENSOR Bとして同じセッションに参加する
+3. 各端末で「ローカルAIを準備」を押す
+4. SENSOR A/Bの `Local ASR` が両方 `READY` になることを確認する
+5. 操作端末では `Local TALK AI` も `READY` にする
+6. 1回テスト計測し、文字起こし・AI TALK BONUS・一言コメントまで確認する
+
+初回はモデルをダウンロードするため時間と通信量が必要です。イベント当日に初回ダウンロードを行わず、事前に全PCで準備してください。ブラウザのサイトデータ / キャッシュを削除すると再ダウンロードが必要になる場合があります。
+
+## 音声計測
+
+### 1. マイクを選択
+
+SENSOR A/Bでそれぞれ使用するマイクを選択します。
+
+記録する情報：
+- ブラウザ上のマイク名
+- 有線 / ワイヤレス / 不明
+- サンプルレート
+- 入力遅延情報（取得できる場合）
+- 周囲ノイズ量
+- 発話判定しきい値
+- ノイズ抑制 / エコーキャンセル / 自動音量調整の状態
+
+### 2. 基準声
+
+A → Bの順で各10秒測定します。
+
+基準用質問：
+「今日ここに来るまで、何をしていましたか？」
+
+相手は基準声測定中は話しません。
+
+保存する主な基準：
+- 基準F0
+- F0のばらつき
+- 基準RMS
+- 基準発話率
+
+質問中は絶対Hzではなく、本人の基準声との差を主に使用します。
 
 例：
+- 120 Hz → 132 Hz = +10%
+- 190 Hz → 202 Hz = 約+6.3%
+
+元々声が高い人ほど「高反応」となる計算にはしません。
+
+### 3. 質問中
+
+音声特徴を時系列で取得し、以下を保存します。
+- Pitch / F0
+- RMS
+- 発話判定
+- ΔHz
+- Δ%
+- cents
+- UP / DOWN / SAME
+- 基準からの音量変化 dB
+
+話者状態は200ms単位で、
+- A
+- B
+- BOTH
+- UNKNOWN
+- SILENCE
+
+の5状態として保存します。判定不能な区間を無理にA/Bへ割り当てません。
+
+## VOICE SCORE β
+
+主な4指標：
+- Pitch Response
+- Expressiveness
+- Speech Balance
+- Turn Taking
+
+心拍と音声はセッション開始からの経過時間を使い、同じ時間軸で比較できるよう記録します。
+
+## HEART SCORE
+
+Question ResponseのEVENT_V2 Q2/Q3計算不整合を修正済みです。
+
+V3暫定式：
+- Direction 15%
+- Temporal 10%
+- Magnitude 10%
+- Question Response 25%
+- Balance 40%
+
+旧式も比較用に保持します。V3は既存データをもとにした暫定式であり、今後の新規実験で検証する前提です。
+
+## AI TALK BONUS
+
+AI TALKは主得点ではなく補助的なボーナスです。
+
+見るもの：
+- 質問への取り組み
+- 相互応答
+- 自己開示
+- 感情表現
+- 会話の豊かさ
+
+セッション全体のBONUSは最大+5点。ローカルAIが失敗してもHEART / VOICEの本体計測は維持します。
+
+## AI一言コメント
+
+HEART / VOICE / AI TALK BONUSなどの結果をローカル言語モデルに渡し、短いコメントを生成します。
+
+- 採点には影響しない
+- 関係性や恋愛感情を断定しない
+- 結果に矛盾しない範囲で毎回表現を少し変える
+- ローカルモデル生成が失敗した場合は安全な定型コメントへフォールバック
+
+## Records
+
+音声・AIタブから以下を確認できます。
+
+- 使用マイク / 接続方式
+- 基準声
+- VOICE SCORE β
+- Pitch Response / Expressiveness / Speech Balance / Turn Taking
+- A/B音声特徴
+- 200ms時系列
+- A / B / BOTH / UNKNOWN / SILENCE
+- A/B文字起こし
+- AI TALK分析
+- BONUS
+
+### 生音声について
+
+生の録音ファイルは研究DBへ保存しません。質問中に一時的に作成し、その端末内の文字起こし処理が終わった後は永続保存しません。
+
+ただし、文字起こし本文とAI分析結果には個人的な会話内容が含まれる可能性があります。研究保存・発表・外部共有時は同意・匿名化・アクセス管理を行ってください。
+
+## Firebaseへのデプロイ
+
+このLOCAL AI版にはCloud Functionsはありません。
+
+Firebase CLIで対象プロジェクトを選択後、通常は：
 
 ```bash
-firebase functions:secrets:set OPENAI_API_KEY
-firebase deploy --only functions
+firebase deploy --only hosting,database
+```
+
+現在のDBルールを変更したくない場合は：
+
+```bash
 firebase deploy --only hosting
 ```
 
-必要ならFunctionsの環境変数 `AI_ANALYSIS_MODEL` で会話分析モデルを変更できる。未指定時は `gpt-6-astra`。
+OpenAI APIキー、Secret Manager、Functionsのデプロイは不要です。
 
-## 初回テスト手順
+## 本番前チェック
 
-1. 3台のPCで同じ最新版を開く。
-2. SENSOR A / SENSOR B で HW9 を接続する。
-3. SENSOR A / SENSOR B それぞれで「PCマイクを準備」を押す。
-4. 2台とも Heart と Microphone が READY になったことを確認。
-5. EVENT_V2 でテストセッションを1回実施。
-6. 結果画面で HEART / VOICE / AI TALK BONUS / AI COMMENT を確認。
-7. RECORDS とExport ZIPで、旧V2・Heart V3・Voice特徴・AI分析が保存されていることを確認。
+- SENSOR A/Bのブラウザが最新版Chrome/Edge
+- 両端末でLocal ASR READY
+- 操作端末でLocal TALK AI READY
+- A/Bそれぞれ正しいマイクを選択
+- 有線/ワイヤレスを正しく記録
+- A/B基準声10秒が有効
+- HW9 A/B READY
+- 実際のイヤホンで1セッション完走
+- Recordsに文字起こし・音声特徴・AI分析が保存される
+- 結果画面でAI BONUS / コメントが表示される
 
-## 研究上の注意
+## 注意
 
-- Heart V3、VOICE SCORE、最終EXPERIENCE SCOREはすべてβ版。
-- 「高得点＝仲が良い」「恋愛感情が強い」とは扱わない。
-- AI TALK BONUSは会話内容の補助的な演出・探索指標。
-- AIコメントは演出専用。
-- 音声を外部AIサービスへ送ることを参加者に事前説明する。
-- 研究モードの同意文は音声・AI分析を含む内容へ更新済み。
-- イベント表示にも音声AI利用の案内を追加済み。
-
-
-## v0.4.0-beta.2 音声記録の詳細
-
-- SENSOR A / SENSOR B の各PCで `getUserMedia()` によりモノラルマイクを取得します。
-- 接続時に約1秒（100ms x 10回）周囲音を測り、`max(0.018, 周囲RMS x 2.5)` を発話判定しきい値にします。
-- QUESTIONフェーズのみ録音・解析します。RESET/BASELINE/RECOVERYは録音しません。
-- Web Audio APIで100msごとにRMSとPitch(F0, 70–350Hz)を計算します。
-- DBには200msごとに間引いた特徴量を保存します。
-- 質問終了時に平均Pitch、Pitch SD、P10/P90、Pitch CV、RMS平均/SD/CV、発話率を集計します。
-- A/Bの時系列からSpeech BalanceとTurn Takingを計算します。
-- MediaRecorderでは質問単位のWebM/Opusを一時的にメモリ上に保持します。AI分析側(A)のみFirebase Functionへ送信し、文字起こしと会話分析に使います。
-- 生音声BlobはRealtime Database / Research Exportには保存しません。AI処理後に破棄します。
-- Records > 音声・AI で、保存済みの特徴量・200ms時系列・文字起こし・AI分析結果を確認できます。
-
-## v0.4.0-beta.4 voice baseline / microphone metadata
-- Each SENSOR PC selects microphone connection type: WIRED / WIRELESS / UNKNOWN.
-- Browser microphone label, sample rate, channel count, echo cancellation, noise suppression, AGC settings, ambient RMS and speech threshold are recorded in session metadata.
-- Before measurement, participant A and B each record a 10-second voice baseline. Measurement cannot start until both baselines are valid.
-- Baseline stores pitch mean/SD, RMS, speech ratio and 200 ms feature frames. Raw baseline audio is not stored.
-- Question Pitch Response is calculated within participant, not by comparing A/B absolute Hz. Records keep delta Hz, delta %, cents, normalized z-like delta and UP/DOWN/SAME.
-- Question RMS change is stored in dB relative to that participant's baseline.
-- Changing/reconnecting a microphone invalidates that side's baseline and requires a new 10-second baseline.
-
-## v0.4.0-beta.4 integrated DAIFESTA voice/AI build
-See `CHANGELOG_v0.4.0-beta.4.md` and `IMPLEMENTATION_NOTES_v0.4.0-beta.4.md`.
-
-This build integrates personal 10-second voice baselines, selectable wired/wireless mouth microphones, dual-channel five-state speaker classification, relative pitch reaction, latency metadata/correction when reported, separate A/B AI transcription, capped AI TALK BONUS, karaoke-style AI result comments, and detailed Voice/AI Records.
+この版では自動テストで心拍計算、音声基準差、5状態話者分類、記録・エクスポート等を確認しています。ただし、ブラウザ上で実AIモデルをダウンロードしてWebGPU/マイクを使う実機テストは、実際に使用するPCで必ず行ってください。
