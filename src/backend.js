@@ -1,8 +1,8 @@
-import { CONFIG } from './config.js?v=0.4.0b4';
+import { CONFIG } from './config.js?v=0.4.0b5';
 
 const impl = CONFIG.backendMode === 'firebase'
-  ? await import('./firebase-backend.js?v=0.4.0b4')
-  : await import('./local-backend.js?v=0.4.0b4');
+  ? await import('./firebase-backend.js?v=0.4.0b5')
+  : await import('./local-backend.js?v=0.4.0b5');
 
 export const subscribe = impl.subscribe;
 export const createSession = impl.createSession;
@@ -19,6 +19,9 @@ export const saveVoiceBaseline = impl.saveVoiceBaseline || (async()=>{});
 export const loadVoiceBaseline = impl.loadVoiceBaseline || (async()=>null);
 export const setMicProfile = impl.setMicProfile || (async()=>{});
 export const setVoiceBaselineReady = impl.setVoiceBaselineReady || (async()=>{});
+export const setLocalAiReady = impl.setLocalAiReady || (async (sessionId,side,data)=>{
+  const s=await impl.loadSession(sessionId);return impl.updateSession(sessionId,{localAiReady:{...(s?.localAiReady||{}),[side]:data||null}});
+});
 export const saveAiTranscript = impl.saveAiTranscript || (async()=>{});
 export const loadAiTranscripts = impl.loadAiTranscripts || (async()=>[]);
 export const saveAiAnalysis = impl.saveAiAnalysis || (async()=>{});

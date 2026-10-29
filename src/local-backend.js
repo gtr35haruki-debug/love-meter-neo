@@ -1,4 +1,4 @@
-import { putSession, getSession, listSessions, putHr, getHr, putSurvey, getSurvey } from './idb.js?v=0.4.0b4';
+import { putSession, getSession, listSessions, putHr, getHr, putSurvey, getSurvey } from './idb.js?v=0.4.0b5';
 
 const CHANNEL='love-meter-neo-sync';
 const bc=('BroadcastChannel' in window)?new BroadcastChannel(CHANNEL):null;
@@ -41,6 +41,7 @@ export async function setSensorReady(sessionId,side,ready){const s=await loadSes
 export async function setMicReady(sessionId,side,ready){const s=await loadSession(sessionId);return updateSession(sessionId,{micReady:{...(s?.micReady||{}),[side]:!!ready}});}
 export async function setMicProfile(sessionId,side,profile){const s=await loadSession(sessionId);return updateSession(sessionId,{micProfile:{...(s?.micProfile||{}),[side]:profile||null}});}
 export async function setVoiceBaselineReady(sessionId,side,ready){const s=await loadSession(sessionId);return updateSession(sessionId,{voiceBaselineReady:{...(s?.voiceBaselineReady||{}),[side]:!!ready}});}
+export async function setLocalAiReady(sessionId,side,data){const s=await loadSession(sessionId);return updateSession(sessionId,{localAiReady:{...(s?.localAiReady||{}),[side]:data||null}});}
 export async function setSurveyStatus(sessionId,key,value=true){const s=await loadSession(sessionId);return updateSession(sessionId,{surveyStatus:{...(s?.surveyStatus||{}),[key]:!!value}});}
 export async function saveHr(sample){await putHr(sample);emit({type:'hr',sessionId:sample.sessionId,side:sample.side});}
 export async function loadHr(sessionId,side){return getHr(sessionId,side);}

@@ -1,5 +1,5 @@
-import { CONFIG, APP_VERSION } from './config.js?v=0.4.0b4';
-import { putHr, getHr as getLocalHr, putSurvey, getSurvey as getLocalSurvey, putOutbox, deleteOutbox, listOutbox } from './idb.js?v=0.4.0b4';
+import { CONFIG, APP_VERSION } from './config.js?v=0.4.0b5';
+import { putHr, getHr as getLocalHr, putSurvey, getSurvey as getLocalSurvey, putOutbox, deleteOutbox, listOutbox } from './idb.js?v=0.4.0b5';
 
 const SDK='12.17.1';
 const [{initializeApp,getApps},{getDatabase,ref,set,update,get,onValue,runTransaction,onDisconnect,push},{getAuth,signInAnonymously,onAuthStateChanged}] = await Promise.all([
@@ -76,6 +76,7 @@ async function registerPresence(sessionId,role){
   if(role==='SENSOR_A'||role==='SENSOR_B'){
     const side=role==='SENSOR_A'?'A':'B';
     try{await onDisconnect(ref(db,`session_meta/${sessionId}/sensorReady/${side}`)).set(false);}catch{}
+    try{await onDisconnect(ref(db,`session_meta/${sessionId}/localAiReady/${side}`)).set(null);}catch{}
   }
 }
 export async function setPresence(sessionId,role,present=true){
@@ -107,6 +108,7 @@ export async function setSensorReady(sessionId,side,ready){await set(ref(db,`ses
 export async function setMicReady(sessionId,side,ready){await set(ref(db,`session_meta/${sessionId}/micReady/${side}`),!!ready);await refreshPublic(sessionId);}
 export async function setMicProfile(sessionId,side,profile){await set(ref(db,`session_meta/${sessionId}/micProfile/${side}`),profile||null);await refreshPublic(sessionId);}
 export async function setVoiceBaselineReady(sessionId,side,ready){await set(ref(db,`session_meta/${sessionId}/voiceBaselineReady/${side}`),!!ready);await refreshPublic(sessionId);}
+export async function setLocalAiReady(sessionId,side,data){await set(ref(db,`session_meta/${sessionId}/localAiReady/${side}`),data||null);await refreshPublic(sessionId);}
 export async function setSurveyStatus(sessionId,key,value=true){await set(ref(db,`session_meta/${sessionId}/surveyStatus/${key}`),!!value);await refreshPublic(sessionId);}
 
 export async function loadSession(sessionId){watch(sessionId);const path=currentRole()==='DISPLAY'?`public_display/${sessionId}`:`session_meta/${sessionId}`;const s=await get(ref(db,path));return s.exists()?s.val():null;}

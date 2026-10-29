@@ -1,14 +1,14 @@
-export const APP_VERSION = '0.4.0-beta.4';
+export const APP_VERSION = '0.4.0-beta.5-local-ai';
 export const QUESTION_BANK_VERSION = 'QUESTION_BANK_V1';
 export const EVENT_QUESTION_BANK_VERSION = 'QUESTION_BANK_EVENT_V3';
 export const CHILD_SUPPORT_VERSION = 'CHILD_SUPPORT_V1';
 export const EVENT_GUIDE_VERSION = 'EVENT_GUIDE_V2';
-export const CONSENT_VERSION = 'CONSENT_V2_AUDIO_AI';
+export const CONSENT_VERSION = 'CONSENT_V3_LOCAL_AUDIO_AI';
 export const PREPROCESSING_VERSION = 'PREPROCESSING_V1_1_PILOT';
 export const METRICS_VERSION = 'METRICS_V1_1_PILOT';
 export const DISPLAY_SCORE_VERSION = 'DISPLAY_SCORE_V3_PILOT';
 export const VOICE_METRICS_VERSION = 'VOICE_METRICS_V0_3_DUAL_MIC_SPEAKER_BETA';
-export const AI_TALK_VERSION = 'AI_TALK_BONUS_V0_2_DUAL_TRANSCRIPT_BETA';
+export const AI_TALK_VERSION = 'AI_TALK_BONUS_V0_3_LOCAL_QWEN_BETA';
 export const DISPLAY_SCALE_VERSION = 'DISPLAY_SCALE_PILOT_20260824_V1';
 
 export const CONFIG = {
@@ -102,8 +102,19 @@ export const CONFIG = {
   },
   ai: {
     enabled: true,
+    mode: 'local-browser',
     maxAudioBytes: 4 * 1024 * 1024,
     requireBothTranscriptsForBonus: true,
+    local: {
+      transformersVersion: '4.0.1',
+      asrModel: 'onnx-community/whisper-tiny',
+      textModel: 'onnx-community/Qwen2.5-0.5B-Instruct',
+      preferWebGPU: true,
+      asrLanguage: 'japanese',
+      asrTask: 'transcribe',
+      textMaxNewTokens: 260,
+      resultCommentMaxNewTokens: 90,
+    },
   },
   firebase: {
     apiKey: 'AIzaSyByFvnkQIbnz2XbZMQOABmGUFa7MyvsiMg',

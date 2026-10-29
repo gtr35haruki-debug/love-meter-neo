@@ -1,4 +1,4 @@
-import { CONFIG } from './config.js?v=0.4.0b4';
+import { CONFIG } from './config.js?v=0.4.0b5';
 
 const KEY='lmneo-records-until';
 const LAST_ACTIVITY_KEY='lmneo-records-last-activity';
@@ -44,20 +44,8 @@ export async function verifyRecordsPin(pin){
     sessionStorage.setItem(LAST_ACTIVITY_KEY,String(Date.now()));
     return {ok:true,recordsUntil,mode:'local'};
   }
-  if(CONFIG.adminGateMode==='client-dev-hash') return verifyClientDevHash(pin);
-
-  const SDK='12.17.1';
-  const [{getApps},{getAuth},{getFunctions,httpsCallable}] = await Promise.all([
-    import(`https://www.gstatic.com/firebasejs/${SDK}/firebase-app.js`),
-    import(`https://www.gstatic.com/firebasejs/${SDK}/firebase-auth.js`),
-    import(`https://www.gstatic.com/firebasejs/${SDK}/firebase-functions.js`),
-  ]);
-  const app=getApps()[0]; if(!app) throw new Error('Firebase is not initialized');
-  const fn=httpsCallable(getFunctions(app),'verifyRecordsPin');
-  const result=await fn({pin:String(pin)});
-  if(!result.data?.ok) throw new Error('PINを確認できませんでした。');
-  await getAuth(app).currentUser?.getIdToken(true);
-  sessionStorage.setItem(KEY,String(result.data.recordsUntil));
-  sessionStorage.setItem(LAST_ACTIVITY_KEY,String(Date.now()));
-  return result.data;
+  // FREE / Spark-compatible beta: no Cloud Functions.
+  // The PIN is checked against the salted browser-side SHA-256 hash configured in config.js.
+  // This is a convenience gate, not production-grade authorization.
+  return verifyClientDevHash(pin);
 }

@@ -1,4 +1,4 @@
-import { CONFIG } from './config.js?v=0.4.0b4';
+import { CONFIG } from './config.js?v=0.4.0b5';
 
 const clamp=(n,a=0,b=100)=>Math.max(a,Math.min(b,n));
 const mean=xs=>xs.length?xs.reduce((a,b)=>a+b,0)/xs.length:null;

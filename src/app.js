@@ -2,21 +2,21 @@ import {
   APP_VERSION, CONFIG, ROLE, SESSION_STATUS, QUESTION_BANK_VERSION, EVENT_QUESTION_BANK_VERSION,
   CHILD_SUPPORT_VERSION, EVENT_GUIDE_VERSION, CONSENT_VERSION,
   PREPROCESSING_VERSION, METRICS_VERSION, DISPLAY_SCORE_VERSION, DISPLAY_SCALE_VERSION, VOICE_METRICS_VERSION, AI_TALK_VERSION
-} from './config.js?v=0.4.0b4';
-import { getQuestionBankForProtocol, getQuestionCategoriesForProtocol, childReadAloudPrompt } from './question-bank.js?v=0.4.0b4';
-import { PROTOCOLS, SET_ORDERS, buildTimeline, getPhaseAtElapsed, isEventProtocol } from './protocols.js?v=0.4.0b4';
+} from './config.js?v=0.4.0b5';
+import { getQuestionBankForProtocol, getQuestionCategoriesForProtocol, childReadAloudPrompt } from './question-bank.js?v=0.4.0b5';
+import { PROTOCOLS, SET_ORDERS, buildTimeline, getPhaseAtElapsed, isEventProtocol } from './protocols.js?v=0.4.0b5';
 import {
   RELATIONSHIP_OPTIONS, PRE_RELATIONSHIP_ITEMS, PRE_STATE_ITEMS, OPTIONAL_ITEM,
   CONDITION_OPTIONS, POST_ITEMS, CONSENT_TEXT
-} from './survey-schema.js?v=0.4.0b4';
-import * as backend from './backend.js?v=0.4.0b4';
-import { HeartRateSensor, DemoHeartRateSensor } from './bluetooth-hw9.js?v=0.4.0b4';
-import { computeSessionMetrics } from './metrics.js?v=0.4.0b4';
-import { VoiceCapture, computeVoiceSessionMetrics, classifySpeakerTimeline, summarizeSpeakerTimeline, listAudioInputDevices } from './voice.js?v=0.4.0b4';
-import { transcribeParticipantAudio, analyzeConversationTranscripts, generateResultComment } from './ai.js?v=0.4.0b4';
-import { buildExportFiles, zipFile, redact } from './research-export.js?v=0.4.0b4';
-import { radarSvg } from './radar.js?v=0.4.0b4';
-import { isRecordsUnlocked, verifyRecordsPin, lockRecords, touchRecordsActivity } from './admin-gate.js?v=0.4.0b4';
+} from './survey-schema.js?v=0.4.0b5';
+import * as backend from './backend.js?v=0.4.0b5';
+import { HeartRateSensor, DemoHeartRateSensor } from './bluetooth-hw9.js?v=0.4.0b5';
+import { computeSessionMetrics } from './metrics.js?v=0.4.0b5';
+import { VoiceCapture, computeVoiceSessionMetrics, classifySpeakerTimeline, summarizeSpeakerTimeline, listAudioInputDevices } from './voice.js?v=0.4.0b5';
+import { transcribeParticipantAudio, analyzeConversationTranscripts, generateResultComment, prepareLocalAi, getLocalAiStatus, subscribeLocalAiStatus } from './ai.js?v=0.4.0b5';
+import { buildExportFiles, zipFile, redact } from './research-export.js?v=0.4.0b5';
+import { radarSvg } from './radar.js?v=0.4.0b5';
+import { isRecordsUnlocked, verifyRecordsPin, lockRecords, touchRecordsActivity } from './admin-gate.js?v=0.4.0b5';
 
 const app=document.querySelector('#app');
 const state={
@@ -40,6 +40,8 @@ const state={
   micDeviceId:'',
   voiceProcessing:0,
   voiceTransitionBusy:false,
+  localAi:getLocalAiStatus(),
+  localAiPreparing:false,
   bpm:null,
   lastSamples:[],
   surveyStage:null,
@@ -61,6 +63,18 @@ const state={
   exportBusy:false,
 };
 
+function localAiStateLabel(st=state.localAi){
+  const asr=st?.asr==='READY'?'ASR READY':st?.asr==='LOADING'?`ASR ${Math.round(st.asrProgress||0)}%`:st?.asr==='ERROR'?'ASR ERROR':'ASR WAIT';
+  const text=st?.text==='READY'?'TALK AI READY':st?.text==='LOADING'?`TALK AI ${Math.round(st.textProgress||0)}%`:st?.text==='ERROR'?'TALK AI ERROR':'TALK AI WAIT';
+  return `${asr} / ${text}`;
+}
+subscribeLocalAiStatus(st=>{
+  state.localAi=st;
+  const label=document.querySelector('#local-ai-status');if(label)label.textContent=localAiStateLabel(st);
+  const detail=document.querySelector('#local-ai-detail');if(detail)detail.textContent=[st.asrMessage,st.textMessage,st.error?`ERROR: ${st.error}`:''].filter(Boolean).join(' / ');
+  const btn=document.querySelector('[data-action="prepare-local-ai"]');if(btn){const loading=st.asr==='LOADING'||st.text==='LOADING'||state.localAiPreparing;btn.disabled=loading;btn.textContent=loading?'ローカルAIを準備中…':'ローカルAIを準備';}
+});
+
 const esc=(s='')=>String(s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
 const fmt=ms=>{const s=Math.max(0,Math.ceil(Number(ms||0)/1000));return `${String(Math.floor(s/60)).padStart(2,'0')}:${String(s%60).padStart(2,'0')}`;};
@@ -81,7 +95,7 @@ const ROLE_LABELS={DISPLAY:'表示端末 (DISPLAY)',SENSOR_A:'計測端末A (SEN
 const PHASE_LABELS={BASELINE:'基準計測 (BASELINE)',QUESTION:'質問 (QUESTION)',RESET:'休憩 (RESET)',RECOVERY:'回復計測 (RECOVERY)'};
 const EVENT_LABELS={
   QUESTION_SKIPPED:'質問スキップ (QUESTION_SKIPPED)',
-  SESSION_CREATED:'セッション作成 (SESSION_CREATED)',DEVICE_JOINED:'端末参加 (DEVICE_JOINED)',HW9_CONNECTED:'心拍計接続 (HW9_CONNECTED)',DEMO_SENSOR_CONNECTED:'デモ心拍計接続 (DEMO_SENSOR_CONNECTED)',HEART_RATE_STREAM_READY:'心拍受信準備完了 (HEART_RATE_STREAM_READY)',MIC_READY:'マイク準備完了 (MIC_READY)',VOICE_BASELINE_READY:'基準声取得 (VOICE_BASELINE_READY)',AI_TRANSCRIPTION_FAILED:'AI文字起こし失敗 (AI_TRANSCRIPTION_FAILED)',AI_TALK_FAILED:'AI会話分析失敗 (AI_TALK_FAILED)',SURVEY_SUBMITTED:'アンケート送信 (SURVEY_SUBMITTED)',ACCLIMATION_STARTED:'順応開始 (ACCLIMATION_STARTED)',MEASUREMENT_SCHEDULED:'測定開始予約 (MEASUREMENT_SCHEDULED)',PAUSED:'一時停止 (PAUSED)',RESUMED:'再開 (RESUMED)',MEASUREMENT_ENDED:'測定終了 (MEASUREMENT_ENDED)',RESULT_CALCULATED:'結果計算 (RESULT_CALCULATED)',CONTROLLER_TRANSFER:'操作端末変更 (CONTROLLER_TRANSFER)'
+  SESSION_CREATED:'セッション作成 (SESSION_CREATED)',DEVICE_JOINED:'端末参加 (DEVICE_JOINED)',HW9_CONNECTED:'心拍計接続 (HW9_CONNECTED)',DEMO_SENSOR_CONNECTED:'デモ心拍計接続 (DEMO_SENSOR_CONNECTED)',HEART_RATE_STREAM_READY:'心拍受信準備完了 (HEART_RATE_STREAM_READY)',MIC_READY:'マイク準備完了 (MIC_READY)',VOICE_BASELINE_READY:'基準声取得 (VOICE_BASELINE_READY)',AI_TRANSCRIPTION_FAILED:'AI文字起こし失敗 (AI_TRANSCRIPTION_FAILED)',AI_TALK_FAILED:'AI会話分析失敗 (AI_TALK_FAILED)',LOCAL_AI_READY:'ローカルAI準備完了 (LOCAL_AI_READY)',SURVEY_SUBMITTED:'アンケート送信 (SURVEY_SUBMITTED)',ACCLIMATION_STARTED:'順応開始 (ACCLIMATION_STARTED)',MEASUREMENT_SCHEDULED:'測定開始予約 (MEASUREMENT_SCHEDULED)',PAUSED:'一時停止 (PAUSED)',RESUMED:'再開 (RESUMED)',MEASUREMENT_ENDED:'測定終了 (MEASUREMENT_ENDED)',RESULT_CALCULATED:'結果計算 (RESULT_CALCULATED)',CONTROLLER_TRANSFER:'操作端末変更 (CONTROLLER_TRANSFER)'
 };
 const REASON_LABELS={INSUFFICIENT_VALID_DATA:'有効データ不足 (INSUFFICIENT_VALID_DATA)',LOW_ACTIVITY:'反応量不足 (LOW_ACTIVITY)',CONTINUOUS_GAP:'連続欠測 (CONTINUOUS_GAP)',NO_VARIANCE:'変動不足 (NO_VARIANCE)',NO_REACTION:'反応量不足 (NO_REACTION)',MISSING_MAGNITUDE:'反応量データ不足 (MISSING_MAGNITUDE)',LOCAL_BASELINE_INVALID:'直前基準データ不足 (LOCAL_BASELINE_INVALID)',QUESTION_SKIPPED:'質問スキップ (QUESTION_SKIPPED)'};
 const CONDITION_LABELS=Object.fromEntries(CONDITION_OPTIONS.map(x=>[x.value,`${x.label} (${x.value})`]));
@@ -242,7 +256,7 @@ async function createSession(){
       childSupport,childSupportVersion:childSupport?CHILD_SUPPORT_VERSION:null,
       eventGuideVersion:protocolId==='EVENT_V2'?EVENT_GUIDE_VERSION:null,
       skippedQuestions:{},
-      sensorReady:{A:false,B:false},micReady:{A:false,B:false},surveyStatus,devicePresence:{[state.role]:now()},guardianOrSchoolConsent:'externally_managed'
+      sensorReady:{A:false,B:false},micReady:{A:false,B:false},localAiReady:{A:null,B:null},surveyStatus,devicePresence:{[state.role]:now()},guardianOrSchoolConsent:'externally_managed'
     };
     await backend.createSession(s);state.session=await backend.loadSession(s.sessionId);state.sessionId=s.sessionId;sessionStorage.setItem('lmneo-session',s.sessionId);
     await backend.appendAuditLog(s.sessionId,{eventType:'SESSION_CREATED',details:{displayId,protocolId,category,setOrder,childSupport}});render();
@@ -253,7 +267,7 @@ async function joinSession(){
   try{
     const s=await backend.joinByCode(code);if(!s){alert('セッションが見つかりません。6桁コードを確認してください。');return;}
     state.session=s;state.sessionId=s.sessionId;sessionStorage.setItem('lmneo-session',s.sessionId);
-    if(roleSide()){await backend.setSensorReady(s.sessionId,roleSide(),false);await backend.setMicReady(s.sessionId,roleSide(),false);}
+    if(roleSide()){await backend.setSensorReady(s.sessionId,roleSide(),false);await backend.setMicReady(s.sessionId,roleSide(),false);await backend.setLocalAiReady(s.sessionId,roleSide(),null).catch(()=>{});}
     await backend.appendAuditLog(s.sessionId,{eventType:'DEVICE_JOINED',details:{role:state.role}});render();
   }catch(e){alert(e?.message||'セッションへ参加できませんでした。');console.error(e);}
 }
@@ -276,6 +290,10 @@ function getStartBlockers(s){
   if(!s.micReady?.B)blockers.push('Microphone B が READY ではありません');
   if(!s.voiceBaselineReady?.A)blockers.push('参加者Aの基準声が未測定です');
   if(!s.voiceBaselineReady?.B)blockers.push('参加者Bの基準声が未測定です');
+  if(CONFIG.ai.enabled&&!s.localAiReady?.A?.asr)blockers.push('SENSOR A のローカル音声認識AIが未準備です');
+  if(CONFIG.ai.enabled&&!s.localAiReady?.B?.asr)blockers.push('SENSOR B のローカル音声認識AIが未準備です');
+  if(CONFIG.ai.enabled&&state.localAi?.asr!=='READY')blockers.push('この操作PCのローカル音声認識AIが未準備です');
+  if(CONFIG.ai.enabled&&isController()&&state.localAi?.text!=='READY')blockers.push('この操作PCのローカル会話分析AIが未準備です');
   if(!s.sensorReady?.A)blockers.push('Sensor A が READY ではありません');
   if(!s.sensorReady?.B)blockers.push('Sensor B が READY ではありません');
   if(s.protocolId==='RESEARCH_V1'){
@@ -333,7 +351,9 @@ function operatorScreen(){
       ${readinessRow('Sensor A',!!s.sensorReady?.A,'実心拍を数秒受信してREADY')}
       ${readinessRow('Sensor B',!!s.sensorReady?.B,'実心拍を数秒受信してREADY')}
       ${readinessRow('Microphone A',!!s.micReady?.A,'音声解析READY')}${readinessRow('Voice Baseline A',!!s.voiceBaselineReady?.A,'本人基準声10秒')}${readinessRow('Microphone B',!!s.micReady?.B,'音声解析READY')}${readinessRow('Voice Baseline B',!!s.voiceBaselineReady?.B,'本人基準声10秒')}
+      ${readinessRow('Local ASR · SENSOR A',!!s.localAiReady?.A?.asr,s.localAiReady?.A?.device||'A端末で準備')}${readinessRow('Local ASR · SENSOR B',!!s.localAiReady?.B?.asr,s.localAiReady?.B?.device||'B端末で準備')}${isController()?readinessRow('Local TALK AI · このPC',state.localAi?.text==='READY',state.localAi?.textMessage||'会話分析・コメント生成用'):''}
       <div class="control-group"><div class="section-title">SENSOR ${side}</div><div class="grid2"><button class="btn" data-action="connect-hw9">HW9接続</button><button class="btn btn-quiet" data-action="connect-demo">DEMO HR</button></div><label class="mini" style="display:block;margin-top:12px">マイク接続方式</label><select id="mic-connection-type" class="input" style="width:100%;margin:6px 0 10px"><option value="UNKNOWN" ${state.micConnectionType==='UNKNOWN'?'selected':''}>不明 / 自動判定</option><option value="WIRED" ${state.micConnectionType==='WIRED'?'selected':''}>有線イヤホン・マイク</option><option value="WIRELESS" ${state.micConnectionType==='WIRELESS'?'selected':''}>ワイヤレスイヤホン・マイク</option></select><label class="mini" style="display:block;margin-top:10px">使用するマイク</label><div class="grid2" style="align-items:end"><select id="mic-device-select" class="input" style="width:100%;margin:6px 0 10px"><option value="">既定のマイク</option>${state.micDevices.map((d,i)=>`<option value="${esc(d.deviceId)}" ${state.micDeviceId===d.deviceId?'selected':''}>${esc(d.label||`マイク ${i+1}`)}</option>`).join('')}</select><button class="btn btn-quiet" data-action="refresh-mics" style="margin-bottom:10px">マイク一覧更新</button></div><button class="btn full mic-btn ${state.voiceStatus==='READY'?'good':''}" data-action="connect-mic" ${state.voiceStatus==='READY'?'disabled':''}>${state.voiceStatus==='READY'?'マイク準備完了':'マイクを準備'}</button><button class="btn full ${s.voiceBaselineReady?.[side]?'good':''}" data-action="measure-voice-baseline" ${state.voiceStatus!=='READY'||state.voiceBaselineBusy?'disabled':''}>${state.voiceBaselineBusy?`基準声を測定中… ${Math.ceil((state.voiceBaselineRemainingMs||0)/1000)}秒`:s.voiceBaselineReady?.[side]?'基準声 10秒 測定済み':'基準声を10秒測定'}</button><div class="mini">A→Bの順で、相手は黙った状態で10秒測定します。基準用質問「今日ここに来るまで、何をしていましたか？」に自然な声で答えてください。基準F0・抑揚・音量を保存し、質問中は本人基準からの変化率で判定します。</div>${preButton}</div>
+      <div class="control-group local-ai-control"><div class="section-title">LOCAL AI · 無料 / 端末内処理</div><button class="btn full ${state.localAi?.asr==='READY'&&(!isController()||state.localAi?.text==='READY')?'good':''}" data-action="prepare-local-ai" ${state.localAiPreparing||state.localAi?.asr==='LOADING'||state.localAi?.text==='LOADING'?'disabled':''}>${state.localAiPreparing||state.localAi?.asr==='LOADING'||state.localAi?.text==='LOADING'?'ローカルAIを準備中…':'ローカルAIを準備'}</button><div id="local-ai-status" class="mini" style="margin-top:10px"><b>${esc(localAiStateLabel())}</b></div><div id="local-ai-detail" class="mini">${esc([state.localAi?.asrMessage,state.localAi?.textMessage].filter(Boolean).join(' / '))}</div><div class="mini" style="margin-top:8px">初回のみAIモデルをダウンロードします。SENSOR A/Bは音声認識AIを準備し、操作端末は会話分析・一言コメント用AIも準備します。音声・文字起こしはAIサービスへ送信しません。</div></div>
       ${s.stage==='SETUP'&&isController()?`<div class="control-group"><div class="section-title">PC1 参加説明</div><div class="intro-control"><button class="btn btn-quiet" data-action="intro-prev" ${Number(s.introPage||0)===0?'disabled':''}>←</button><span>${Number(s.introPage||0)+1} / 3</span><button class="btn btn-quiet" data-action="intro-next" ${Number(s.introPage||0)>=2?'disabled':''}>→</button></div></div>`:''}
       ${s.stage==='SETUP'?`<div class="control-group"><button class="btn primary full" data-action="start-acclim" ${canProceed?'':'disabled'}>${s.protocolId==='RESEARCH_V1'?'5分の順応を開始':'計測準備完了'}</button>${!canProceed?`<div class="blocker"><b>開始できない理由</b>${blockers.map(x=>`<span>• ${esc(x)}</span>`).join('')}</div>`:''}</div>`:''}
       ${s.stage==='ACCLIMATION'?`<div class="control-group"><div class="callout info">順応中 <b id="live-acclim">${fmt((s.readyAtMs||0)-now())}</b><br><small>装着直後・初期緊張の影響を減らすための時間です。</small></div></div>`:''}
@@ -417,6 +437,21 @@ async function connectSensor(demo=false){
   try{await state.sensor.connect();await backend.appendAuditLog(state.sessionId,{eventType:demo?'DEMO_SENSOR_CONNECTED':'HW9_CONNECTED',details:{side}});}
   catch(e){state.sensorStatus='ERROR';alert(`センサー接続に失敗しました。\n${e.message}`);render();}
 }
+async function prepareLocalAiForThisPc(){
+  if(state.localAiPreparing)return;
+  state.localAiPreparing=true;render();
+  try{
+    await prepareLocalAi({asr:true,text:isController()});
+    const ai=getLocalAiStatus(),side=roleSide();
+    if(side&&state.sessionId)await backend.setLocalAiReady(state.sessionId,side,{asr:ai.asr==='READY',device:ai.asrDevice||null,model:CONFIG.ai.local.asrModel,preparedAt:now()});
+    await backend.appendAuditLog(state.sessionId,{eventType:'LOCAL_AI_READY',details:{role:state.role,asr:ai.asr,text:ai.text,asrDevice:ai.asrDevice,textDevice:ai.textDevice,asrModel:CONFIG.ai.local.asrModel,textModel:CONFIG.ai.local.textModel}}).catch(()=>{});
+  }catch(e){alert(`ローカルAIの準備に失敗しました。
+${e?.message||e}
+
+Chrome / Edge最新版・十分な空き容量・初回のみインターネット接続を確認してください。`);}
+  finally{state.localAiPreparing=false;render();}
+}
+
 async function refreshMicrophoneList(){
   try{
     state.micDevices=await listAudioInputDevices();
@@ -654,14 +689,14 @@ function resultDisplay(s){
 }
 async function loadSupplementalForResult(sessionId,expectedQuestions){
   let voiceA=[],voiceB=[],transcripts=[],ai=[];
-  for(let i=0;i<10;i++){
+  for(let i=0;i<90;i++){
     [voiceA,voiceB,transcripts,ai]=await Promise.all([backend.loadVoiceFeatures(sessionId,'A'),backend.loadVoiceFeatures(sessionId,'B'),backend.loadAiTranscripts(sessionId),backend.loadAiAnalyses(sessionId)]);
     const pairs=new Map();for(const t of transcripts){const q=Number(t.questionIndex);if(!Number.isFinite(q))continue;const x=pairs.get(q)||{};x[t.side]=t;pairs.set(q,x);}
     const completePairs=[...pairs.values()].filter(x=>x.A&&x.B).length;
     const voiceReady=voiceA.length>=expectedQuestions&&voiceB.length>=expectedQuestions;
     const transcriptReady=!CONFIG.ai.enabled||!CONFIG.ai.requireBothTranscriptsForBonus||completePairs>=expectedQuestions;
     if(voiceReady&&transcriptReady)break;
-    await new Promise(r=>setTimeout(r,700));
+    await new Promise(r=>setTimeout(r,1000));
   }
   return {voiceA,voiceB,transcripts,ai};
 }
@@ -857,7 +892,7 @@ async function recordsVoiceTab(s){
     <div class="callout info" style="margin-bottom:18px"><b>「声が元々高い＝高反応」にはしません。</b><br>Pitch Responseは各自の10秒基準声に対するΔHz・Δ%・centsを保存し、主判定は本人内の相対変化率です。UP / DOWN / SAMEは方向として別保存し、UPだから高得点という扱いもしません。</div>
     <div class="callout info" style="margin-bottom:18px"><b>話者判定：</b>片耳マイク2本の時系列を共通時間軸で比較し、A / B / BOTH / UNKNOWN / SILENCE の5種類で保存・表示します。判別が曖昧な音はUNKNOWNのまま残します。</div>
     <div class="grid5"><div class="kpi"><small>VOICE SCORE β</small><strong>${score(vm.voiceScore)}</strong></div><div class="kpi"><small>Pitch Response</small><strong>${score(vm.pitchResponse)}</strong></div><div class="kpi"><small>Expressiveness</small><strong>${score(vm.expressiveness)}</strong></div><div class="kpi"><small>Speech Balance</small><strong>${score(vm.speechBalance)}</strong></div><div class="kpi"><small>Turn Taking</small><strong>${score(vm.turnTaking)}</strong></div></div>
-    <div class="callout info" style="margin-top:18px"><b>AI TALK BONUS 合計：+${bonus} / ${CONFIG.experienceScore.aiTalkBonusMax}</b><br>A/Bそれぞれの口元マイク音声を別々に文字起こしし、その2本を合わせて会話特徴だけをAIが補助評価します。AIは親密さ・恋愛感情を直接判定しません。生音声ファイルは研究DBには保存せず、特徴量・文字起こし・AI結果を保存します。</div>${questionBlocks||'<p class="subtitle" style="margin-top:18px">このセッションには音声記録がありません。</p>'}`;
+    <div class="callout info" style="margin-top:18px"><b>AI TALK BONUS 合計：+${bonus} / ${CONFIG.experienceScore.aiTalkBonusMax}</b><br>A/Bそれぞれの口元マイク音声を各PC内のローカルAIで別々に文字起こしし、その2本を操作PC内のローカルAIで合わせて会話特徴だけを補助評価します。AIは親密さ・恋愛感情を直接判定しません。生音声ファイルは研究DBには保存せず、特徴量・文字起こし・AI結果を保存します。</div>${questionBlocks||'<p class="subtitle" style="margin-top:18px">このセッションには音声記録がありません。</p>'}`;
 }
 
 function splitByGap(arr,gap=CONFIG.graphGapMs){const chunks=[];let cur=[];for(const p of arr){if(cur.length&&p.sessionElapsedMs-cur.at(-1).sessionElapsedMs>gap){chunks.push(cur);cur=[];}cur.push(p);}if(cur.length)chunks.push(cur);return chunks;}
@@ -945,7 +980,7 @@ function bindDynamic(){
 
 async function handleAction(a,el){
   if(a==='display-home')return clearRole();if(a==='home')return clearRole();if(a==='create-session')return createSession();if(a==='join-session')return joinSession();
-  if(a==='connect-hw9')return connectSensor(false);if(a==='connect-demo')return connectSensor(true);if(a==='refresh-mics')return refreshMicrophoneList();if(a==='connect-mic')return connectMicrophone();if(a==='measure-voice-baseline')return measureVoiceBaseline();
+  if(a==='connect-hw9')return connectSensor(false);if(a==='connect-demo')return connectSensor(true);if(a==='refresh-mics')return refreshMicrophoneList();if(a==='connect-mic')return connectMicrophone();if(a==='measure-voice-baseline')return measureVoiceBaseline();if(a==='prepare-local-ai')return prepareLocalAiForThisPc();
   if(a==='open-pre-survey'){state.surveyStage='pre';state.surveySide=roleSide();return render();}if(a==='open-post-survey'){state.surveyStage='post';state.surveySide=roleSide();return render();}
   if(a==='cancel-survey'){if(confirm('アンケートを閉じて運用画面へ戻りますか？入力中の内容は保存されません。')){state.surveyStage=null;state.surveySide=null;render();}return;}
   if(a==='staff-return'){if(confirm('実験担当者の操作画面へ戻りますか？')){state.surveyLocked=null;await refreshSession();render();}return;}
@@ -976,5 +1011,5 @@ function render(){
   app.innerHTML=operatorScreen();bind();startTick();state.lastPhaseKey=phaseKey(state.session);
 }
 
-window.addEventListener('beforeunload',()=>{try{if(state.sessionId&&roleSide())backend.setSensorReady(state.sessionId,roleSide(),false);}catch{}});
+window.addEventListener('beforeunload',()=>{try{if(state.sessionId&&roleSide()){backend.setSensorReady(state.sessionId,roleSide(),false);backend.setLocalAiReady(state.sessionId,roleSide(),null);}}catch{}});
 (async()=>{if(state.sessionId)await refreshSession();render();})();

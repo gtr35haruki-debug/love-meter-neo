@@ -2,8 +2,8 @@
  * This module has no Firebase dependency; it builds one standards-compliant ZIP32 file
  * from already loaded per-session records. Never use this ZIP as proof of consent to share.
  */
-import { preprocess } from './metrics.js?v=0.4.0b4';
-import { APP_VERSION } from './config.js?v=0.4.0b4';
+import { preprocess } from './metrics.js?v=0.4.0b5';
+import { APP_VERSION } from './config.js?v=0.4.0b5';
 
 export const EXPORT_VERSION='EXPORT_V1';
 const enc=new TextEncoder();

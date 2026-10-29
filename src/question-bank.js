@@ -92,4 +92,4 @@ export function childReadAloudPrompt(questionText=''){
   return `二人とも、このしつもんにこたえてみてね。「${q}」`;
 }
 
-export { RELATIONSHIP_OPTIONS } from './survey-schema.js?v=0.4.0b4';
+export { RELATIONSHIP_OPTIONS } from './survey-schema.js?v=0.4.0b5';
