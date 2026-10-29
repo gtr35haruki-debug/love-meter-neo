@@ -1,40 +1,66 @@
 <!doctype html>
 <html lang="ja">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <meta name="theme-color" content="#070a14"/>
-  <title>LOVE METER NEO v0.4.0 beta.5 LOCAL AI</title>
-  <link rel="stylesheet" href="./styles.css?v=0.4.0b5"/>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="theme-color" content="#070a14"/>
+<title>LOVE METER NEO v0.4.0 beta.5 LOCAL AI</title>
+<link rel="stylesheet" href="./styles.css?v=0.4.0b5h3"/>
 </head>
 <body>
-  <div id="app"><div id="boot-status" style="padding:28px;color:#d7def7;font-family:system-ui,sans-serif">LOVE METER NEO を起動しています…</div></div>
-  <script>
-    (()=>{
-      const esc=(v)=>String(v??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
-      const showBootError=(value,meta={})=>{
-        const app=document.getElementById('app');
-        if(!app)return;
-        const msg=String(value?.message||value?.reason?.message||value?.reason||value||'Unknown startup error');
-        const stack=String(value?.stack||value?.reason?.stack||'');
-        const details=[
-          meta.filename?`File: ${meta.filename}`:'',
-          meta.lineno?`Line: ${meta.lineno}${meta.colno?` / Column: ${meta.colno}`:''}`:'',
-          stack?`Stack:\n${stack}`:''
-        ].filter(Boolean).join('\n\n');
-        app.innerHTML=`<div style="max-width:900px;margin:48px auto;padding:28px;border:1px solid #ef5f78;border-radius:18px;background:#151929;color:#f7f8ff;font-family:system-ui,sans-serif"><h2 style="margin-top:0;color:#ff7e95">起動エラー</h2><p>LOVE METER NEO の起動に失敗しました。</p><pre style="white-space:pre-wrap;word-break:break-word;background:#090c15;padding:16px;border-radius:12px;color:#ffd9df">${esc(msg)}${details?`\n\n${esc(details)}`:''}</pre><p style="line-height:1.7">この表示の <b>File / Line / Column</b> が原因箇所です。Firebase認証エラーの場合はその内容もここに表示されます。</p><button onclick="location.reload()" style="padding:10px 16px;border:0;border-radius:10px;font-weight:700">再読み込み</button></div>`;
-      };
-      window.__lmShowBootError=showBootError;
-      window.addEventListener('error',e=>showBootError(e.error||e.message,{filename:e.filename,lineno:e.lineno,colno:e.colno}));
-      window.addEventListener('unhandledrejection',e=>showBootError(e.reason));
-      setTimeout(()=>{
-        const app=document.getElementById('app');
-        if(app && app.querySelector('#boot-status')) showBootError('起動処理が15秒以内に完了しませんでした。ネットワーク・Firebase接続・モジュール読み込みを確認してください。');
-      },15000);
-    })();
-  </script>
-  <script type="module">
-    import('./src/app.js?v=0.4.0b5h2').catch(err=>window.__lmShowBootError?.(err));
-  </script>
+<div id="app"><div id="boot-status" style="padding:28px;color:#d7def7;font-family:system-ui,sans-serif">LOVE METER NEO を起動診断しています…</div></div>
+<script>
+(()=>{
+  const esc=(v)=>String(v??'').replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+  const app=document.getElementById('app');
+  const render=(title,msg,details='')=>{
+    if(!app)return;
+    app.innerHTML=`<div style="max-width:900px;margin:48px auto;padding:28px;border:1px solid #ef5f78;border-radius:18px;background:#151929;color:#f7f8ff;font-family:system-ui,sans-serif"><h2 style="margin-top:0;color:#ff7e95">${esc(title)}</h2><p>${esc(msg)}</p>${details?`<pre style="white-space:pre-wrap;word-break:break-word;background:#090c15;padding:16px;border-radius:12px;color:#ffd9df">${esc(details)}</pre>`:''}<button onclick="location.reload()" style="padding:10px 16px;border:0;border-radius:10px;font-weight:700">再読み込み</button></div>`;
+  };
+  window.__lmShowBootError=(value,meta={})=>{
+    const msg=String(value?.message||value?.reason?.message||value?.reason||value||'Unknown startup error');
+    const stack=String(value?.stack||value?.reason?.stack||'');
+    const details=[meta.module?`Module: ${meta.module}`:'',meta.filename?`File: ${meta.filename}`:'',meta.lineno?`Line: ${meta.lineno}${meta.colno?` / Column: ${meta.colno}`:''}`:'',stack?`Stack:\n${stack}`:''].filter(Boolean).join('\n\n');
+    render('起動エラー',msg,details);
+  };
+  window.addEventListener('error',e=>window.__lmShowBootError(e.error||e.message,{filename:e.filename,lineno:e.lineno,colno:e.colno}));
+  window.addEventListener('unhandledrejection',e=>window.__lmShowBootError(e.reason));
+})();
+</script>
+<script type="module">
+const modules=[
+  './src/config.js?v=0.4.0b5h3',
+  './src/protocols.js?v=0.4.0b5h3',
+  './src/question-bank.js?v=0.4.0b5h3',
+  './src/survey-schema.js?v=0.4.0b5h3',
+  './src/metrics.js?v=0.4.0b5h3',
+  './src/voice.js?v=0.4.0b5h3',
+  './src/ai.js?v=0.4.0b5h3',
+  './src/radar.js?v=0.4.0b5h3',
+  './src/research-export.js?v=0.4.0b5h3',
+  './src/admin-gate.js?v=0.4.0b5h3',
+  './src/bluetooth-hw9.js?v=0.4.0b5h3',
+  './src/idb.js?v=0.4.0b5h3',
+  './src/local-backend.js?v=0.4.0b5h3',
+  './src/firebase-backend.js?v=0.4.0b5h3',
+  './src/backend.js?v=0.4.0b5h3'
+];
+const status=document.getElementById('boot-status');
+for(const mod of modules){
+  try{
+    if(status)status.textContent=`起動診断中: ${mod}`;
+    await import(mod);
+  }catch(err){
+    window.__lmShowBootError?.(err,{module:mod});
+    throw err;
+  }
+}
+try{
+  if(status)status.textContent='起動診断完了。app.js を起動しています…';
+  await import('./src/app.js?v=0.4.0b5h3');
+}catch(err){
+  window.__lmShowBootError?.(err,{module:'./src/app.js?v=0.4.0b5h3'});
+}
+</script>
 </body>
 </html>
