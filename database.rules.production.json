@@ -1,0 +1,73 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "indexes": {
+      "join_code": { "$code": { ".read": "auth != null", ".write": "auth != null" } },
+      "display_counter": { "$date": { ".read": "auth != null", ".write": "auth != null" } },
+      "participant_counter": { ".read": "auth != null", ".write": "auth != null" },
+      "assignment_counts": { ".read": "auth != null", ".write": "auth != null" },
+      "pair_last_order": { ".read": "auth != null", ".write": "auth != null" }
+    },
+    "session_members": {
+      "$session": {
+        "$uid": {
+          ".read": "$uid === auth.uid || (auth.token.recordsUntil != null && auth.token.recordsUntil > now)",
+          ".write": "$uid === auth.uid && (newData.val() === 'DISPLAY' || newData.val() === 'SENSOR_A' || newData.val() === 'SENSOR_B')"
+        }
+      }
+    },
+    "device_presence": {
+      "$session": {
+        "$uid": {
+          ".read": "$uid === auth.uid || (auth.token.recordsUntil != null && auth.token.recordsUntil > now)",
+          ".write": "$uid === auth.uid"
+        }
+      }
+    },
+    "session_meta": {
+      ".read": "auth != null && auth.token.recordsUntil != null && auth.token.recordsUntil > now",
+      "$session": {
+        ".read": "auth != null && (root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_A' || root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_B' || (auth.token.recordsUntil != null && auth.token.recordsUntil > now))",
+        ".write": "auth != null && ((!data.exists() && newData.child('createdByUid').val() === auth.uid) || root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_A' || root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_B')"
+      }
+    },
+    "public_display": {
+      "$session": {
+        ".read": "auth != null && root.child('session_members').child($session).child(auth.uid).exists()",
+        ".write": "auth != null && (root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_A' || root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_B')"
+      }
+    },
+    "heart_rate_raw": {
+      ".read": "auth != null && auth.token.recordsUntil != null && auth.token.recordsUntil > now",
+      "$session": {
+        "$side": {
+          ".read": "auth != null && (root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_A' || root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_B')",
+          "$sample": {
+            ".write": "auth != null && !data.exists() && (($side === 'A' && root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_A') || ($side === 'B' && root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_B'))"
+          }
+        }
+      }
+    },
+    "questionnaires": {
+      ".read": "auth != null && auth.token.recordsUntil != null && auth.token.recordsUntil > now",
+      "$session": {
+        "$side": {
+          "$stage": {
+            ".write": "auth != null && (($side === 'A' && root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_A') || ($side === 'B' && root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_B'))"
+          }
+        }
+      }
+    },
+    "audit_logs": {
+      ".read": "auth != null && auth.token.recordsUntil != null && auth.token.recordsUntil > now",
+      "$session": {
+        "$log": {
+          ".write": "auth != null && (root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_A' || root.child('session_members').child($session).child(auth.uid).val() === 'SENSOR_B')"
+        }
+      }
+    },
+    "question_banks": { ".read": "auth != null" },
+    "protocols": { ".read": "auth != null" }
+  }
+}
